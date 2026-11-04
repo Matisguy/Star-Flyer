@@ -28,7 +28,41 @@ public:
             float near,
             float far);
 
+    /**
+     * Generates a 3D perspective projection matrix given FOV in degrees, aspect ratio, near and far planes
+     */
+    static float *buildPerspectiveMatrix(
+            float *outMatrix,
+            float fovDegrees,
+            float aspect,
+            float zNear,
+            float zFar);
+
+    /**
+     * Generates a camera view matrix based on phone orientation (pitch, roll, yaw in degrees)
+     */
+    static float *buildCameraViewMatrix(
+            float *outMatrix,
+            float pitchDeg,
+            float rollDeg,
+            float yawDeg);
+
+    static float *buildMatrixFromVectors(
+            float *outMatrix,
+            float *dirVector,
+            float *bodyVector);
+
+    /**
+     * Multiplies two 4x4 column-major matrices (out = matA * matB)
+     */
+    static float *multiplyMatrix4x4(
+            const float *matA,
+            const float *matB,
+            float *outMatrix);
+
     static float *buildIdentityMatrix(float *outMatrix);
+
+    static float *normalizeVector(float *vector);
 };
 
 #endif //ANDROIDGLINVESTIGATIONS_UTILITY_H

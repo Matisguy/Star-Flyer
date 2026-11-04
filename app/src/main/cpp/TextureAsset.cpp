@@ -73,6 +73,54 @@ TextureAsset::loadAsset(AAssetManager *assetManager, const std::string &assetPat
     return std::shared_ptr<TextureAsset>(new TextureAsset(textureId));
 }
 
+std::shared_ptr<TextureAsset>
+TextureAsset::createCheckerboardTexture(int width, int height, int checkSize) {
+    std::vector<uint8_t> pixels(width * height * 4);
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            bool isEven = ((x / checkSize) + (y / checkSize)) % 2 == 0;
+            // High contrast sci-fi grid: deep navy/grey vs bright cyan/white
+            uint8_t r = isEven ? 25 : 190;
+            uint8_t g = isEven ? 35 : 210;
+            uint8_t b = isEven ? 60 : 235;
+            uint8_t a = 255;
+
+            int idx = (y * width + x) * 4;
+            pixels[idx + 0] = r;
+            pixels[idx + 1] = g;
+            pixels[idx + 2] = b;
+            pixels[idx + 3] = a;
+        }
+    }
+
+    GLuint textureId;
+    glGenTextures(1, &textureId);
+    glBindTexture(GL_TEXTURE_2D, textureId);
+
+    // Repeat mode for tiled skybox faces
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+    glTexImage2D(
+            GL_TEXTURE_2D,
+            0,
+            GL_RGBA,
+            width,
+            height,
+            0,
+            GL_RGBA,
+            GL_UNSIGNED_BYTE,
+            pixels.data()
+    );
+
+    glGenerateMipmap(GL_TEXTURE_2D);
+
+    return std::shared_ptr<TextureAsset>(new TextureAsset(textureId));
+}
+
 TextureAsset::~TextureAsset() {
     // return texture resources
     glDeleteTextures(1, &textureID_);

@@ -170,7 +170,7 @@ public class MainActivity extends GameActivity implements SensorEventListener {
                 : "NOT AVAILABLE";
 
         String debugText = String.format(Locale.US,
-                "=== STAR FLYER SENSOR DEBUG ===\n" +
+                "\n \n === STAR FLYER SENSOR DEBUG ===\n" +
                 "ACCEL: %s\n" +
                 "GYRO : %s\n" +
                 "MAG  : %s\n" +

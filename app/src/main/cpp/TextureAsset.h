@@ -18,6 +18,12 @@ public:
     static std::shared_ptr<TextureAsset>
     loadAsset(AAssetManager *assetManager, const std::string &assetPath);
 
+    /**
+     * Generates a procedural checkerboard texture for the skybox / placeholder rendering
+     */
+    static std::shared_ptr<TextureAsset>
+    createCheckerboardTexture(int width = 256, int height = 256, int checkSize = 32);
+
     ~TextureAsset();
 
     /*!
