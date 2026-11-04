@@ -1,0 +1,31 @@
+# .aiexclude - Excludes files/directories from AI context in Android Studio
+
+# Build outputs & generated C++/native build directories
+build/
+**/build/
+.cxx/
+**/.cxx/
+.gradle/
+
+# IDE & workspace metadata
+.idea/
+
+# Local properties & credentials
+local.properties
+*.keystore
+*.jks
+
+# Binary assets (fonts, audio, images, native libraries)
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+*.wav
+*.mp3
+*.ogg
+*.ttf
+*.otf
+*.so
+*.dll
+*.exe
