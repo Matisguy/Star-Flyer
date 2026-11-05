@@ -43,7 +43,7 @@ void main() {
 
 // Fragment shader
 static const char *fragment = R"fragment(#version 300 es
-precision medium float;
+precision mediump float;
 
 in vec2 fragUV;
 
@@ -75,34 +75,22 @@ Renderer::~Renderer() {
 void Renderer::render() {
     updateRenderArea();
 
-    // Fetch real-time phone orientation (Pitch, Roll, Yaw) from sensor bridge
-    float pitch = 0.0f, roll = 0.0f, yaw = 0.0f;
-    float grav[3] = {0.f, 0.f, 0.f};
-    float north[3] = {0.f, 0.f, 0.f};
-    float gyro[3] = {0.f, 0.f, 0.f};
-    {
-        std::lock_guard<std::mutex> lock(gSensorMutex);
-        pitch = gSensorData.pitch;
-        roll = gSensorData.roll;
-        yaw = gSensorData.yaw;
-        for (int i = 0; i < 3;  i++) {
-            grav[i] = gSensorData.accel[i];
-            north[i] = gSensorData.mag[i];
-            gyro[i] = gSensorData.gyro[i];
-        }
-    }
+    // 1. Calculate timestep (delta time in seconds)
+    float dt = timeStep_.tick();
 
-    // Build 3D perspective projection matrix (65° Field of View)
+    // 2. Update orientation tracker with sensor fusion & noise reduction
+    orientationTracker_.update(dt);
+
+    // 3. Build 3D perspective projection matrix (65° Field of View)
     float aspect = (height_ > 0) ? (float)width_ / (float)height_ : 1.0f;
     float projectionMatrix[16];
     Utility::buildPerspectiveMatrix(projectionMatrix, 65.0f, aspect, 0.1f, 500.0f);
 
-    // Build camera view matrix matching the physical phone tilt
+    // 4. Retrieve smooth 3D camera view matrix from OrientationTracker
     float viewMatrix[16];
-    Utility::buildCameraViewMatrix(viewMatrix, pitch, roll, yaw);
-    Utility::buildMatrixFromVectors(viewMatrix, north, grav);
+    orientationTracker_.getViewMatrix(viewMatrix);
 
-    // Combine Projection * View into Model-View-Projection (MVP) matrix
+    // 5. Combine Projection * View into Model-View-Projection (MVP) matrix
     float mvpMatrix[16];
     Utility::multiplyMatrix4x4(projectionMatrix, viewMatrix, mvpMatrix);
 

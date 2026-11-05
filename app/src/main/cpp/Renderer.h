@@ -6,6 +6,8 @@
 
 #include "Model.h"
 #include "Shader.h"
+#include "OrientationTracker.h"
+#include "TimeStep.h"
 
 struct android_app;
 
@@ -69,6 +71,9 @@ private:
 
     std::unique_ptr<Shader> shader_;
     std::vector<Model> models_;
+
+    OrientationTracker orientationTracker_;
+    TimeStep timeStep_;
 };
 
 #endif //ANDROIDGLINVESTIGATIONS_RENDERER_H

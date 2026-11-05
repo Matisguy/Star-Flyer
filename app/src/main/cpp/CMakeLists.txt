@@ -10,6 +10,7 @@ project("starflyer")
 add_library(starflyer SHARED
         main.cpp
         AndroidOut.cpp
+        OrientationTracker.cpp
         Renderer.cpp
         Shader.cpp
         TextureAsset.cpp
