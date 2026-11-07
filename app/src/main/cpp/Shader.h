@@ -32,7 +32,8 @@ public:
             const std::string &fragmentSource,
             const std::string &positionAttributeName,
             const std::string &uvAttributeName,
-            const std::string &projectionMatrixUniformName);
+            const std::string &projectionMatrixUniformName,
+            const std::string &colorUniformName = "uColor");
 
     inline ~Shader() {
         if (program_) {
@@ -63,6 +64,11 @@ public:
      */
     void setProjectionMatrix(float *projectionMatrix) const;
 
+    /**
+     * Sets RGBA tint color multiplier in the shader
+     */
+    void setColor(float r, float g, float b, float a = 1.0f) const;
+
 private:
     /*!
      * Helper function to load a shader of a given type
@@ -83,16 +89,19 @@ private:
             GLuint program,
             GLint position,
             GLint uv,
-            GLint projectionMatrix)
+            GLint projectionMatrix,
+            GLint colorUniform)
             : program_(program),
               position_(position),
               uv_(uv),
-              projectionMatrix_(projectionMatrix) {}
+              projectionMatrix_(projectionMatrix),
+              colorUniform_(colorUniform) {}
 
     GLuint program_;
     GLint position_;
     GLint uv_;
     GLint projectionMatrix_;
+    GLint colorUniform_;
 };
 
 #endif //ANDROIDGLINVESTIGATIONS_SHADER_H

@@ -12,7 +12,9 @@ add_library(starflyer SHARED
         AndroidOut.cpp
         OrientationTracker.cpp
         Renderer.cpp
+        RigidBody.cpp
         Shader.cpp
+        TeapotModel.cpp
         TextureAsset.cpp
         Utility.cpp)
 

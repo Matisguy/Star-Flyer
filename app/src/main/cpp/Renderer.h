@@ -3,11 +3,13 @@
 
 #include <EGL/egl.h>
 #include <memory>
+#include <vector>
 
 #include "Model.h"
 #include "Shader.h"
 #include "OrientationTracker.h"
 #include "TimeStep.h"
+#include "RigidBody.h"
 
 struct android_app;
 
@@ -43,20 +45,17 @@ public:
 
 private:
     /*!
-     * Performs necessary OpenGL initialization. Customize this if you want to change your EGL
-     * context or application-wide settings.
+     * Performs necessary OpenGL initialization.
      */
     void initRenderer();
 
     /*!
-     * @brief we have to check every frame to see if the framebuffer has changed in size. If it has,
-     * update the viewport accordingly
+     * @brief Check every frame to see if the framebuffer has changed size
      */
     void updateRenderArea();
 
     /*!
-     * Creates the models for this sample. You'd likely load a scene configuration from a file or
-     * use some other setup logic in your full game.
+     * Creates scene models (Skybox and Teapot meshes)
      */
     void createModels();
 
@@ -70,10 +69,17 @@ private:
     bool shaderNeedsNewProjectionMatrix_;
 
     std::unique_ptr<Shader> shader_;
-    std::vector<Model> models_;
 
     OrientationTracker orientationTracker_;
     TimeStep timeStep_;
+
+    // Skybox and Teapot models
+    std::unique_ptr<Model> skyboxModel_;
+    std::unique_ptr<Model> teapotModel_;
+
+    // Physics objects
+    std::unique_ptr<RigidBody> lightTeapot_;
+    std::unique_ptr<RigidBody> heavyTeapot_;
 };
 
 #endif //ANDROIDGLINVESTIGATIONS_RENDERER_H

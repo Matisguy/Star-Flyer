@@ -9,7 +9,8 @@ Shader *Shader::loadShader(
         const std::string &fragmentSource,
         const std::string &positionAttributeName,
         const std::string &uvAttributeName,
-        const std::string &projectionMatrixUniformName) {
+        const std::string &projectionMatrixUniformName,
+        const std::string &colorUniformName) {
     Shader *shader = nullptr;
 
     GLuint vertexShader = loadShader(GL_VERTEX_SHADER, vertexSource);
@@ -45,15 +46,15 @@ Shader *Shader::loadShader(
 
             glDeleteProgram(program);
         } else {
-            // Get the attribute and uniform locations by name. You may also choose to hardcode
-            // indices with layout= in your shader, but it is not done in this sample
             GLint positionAttribute = glGetAttribLocation(program, positionAttributeName.c_str());
             GLint uvAttribute = glGetAttribLocation(program, uvAttributeName.c_str());
             GLint projectionMatrixUniform = glGetUniformLocation(
                     program,
                     projectionMatrixUniformName.c_str());
+            GLint colorUniform = glGetUniformLocation(
+                    program,
+                    colorUniformName.c_str());
 
-            // Only create a new shader if all the attributes are found.
             if (positionAttribute != -1
                 && uvAttribute != -1
                 && projectionMatrixUniform != -1) {
@@ -62,14 +63,14 @@ Shader *Shader::loadShader(
                         program,
                         positionAttribute,
                         uvAttribute,
-                        projectionMatrixUniform);
+                        projectionMatrixUniform,
+                        colorUniform);
             } else {
                 glDeleteProgram(program);
             }
         }
     }
 
-    // The shaders are no longer needed once the program is linked. Release their memory.
     glDeleteShader(vertexShader);
     glDeleteShader(fragmentShader);
 
@@ -151,4 +152,10 @@ void Shader::drawModel(const Model &model) const {
 
 void Shader::setProjectionMatrix(float *projectionMatrix) const {
     glUniformMatrix4fv(projectionMatrix_, 1, false, projectionMatrix);
+}
+
+void Shader::setColor(float r, float g, float b, float a) const {
+    if (colorUniform_ != -1) {
+        glUniform4f(colorUniform_, r, g, b, a);
+    }
 }

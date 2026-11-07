@@ -9,9 +9,8 @@
 #include "Shader.h"
 #include "Utility.h"
 #include "TextureAsset.h"
-#include "SensorData.h"
+#include "TeapotModel.h"
 
-//! executes glGetString and outputs the result to logcat
 #define PRINT_GL_STRING(s) {aout << #s": "<< glGetString(s) << std::endl;}
 
 #define PRINT_GL_STRING_AS_LIST(s) { \
@@ -48,11 +47,12 @@ precision mediump float;
 in vec2 fragUV;
 
 uniform sampler2D uTexture;
+uniform vec4 uColor;
 
 out vec4 outColor;
 
 void main() {
-    outColor = texture(uTexture, fragUV);
+    outColor = texture(uTexture, fragUV) * uColor;
 }
 )fragment";
 
@@ -78,33 +78,76 @@ void Renderer::render() {
     // 1. Calculate timestep (delta time in seconds)
     float dt = timeStep_.tick();
 
-    // 2. Update orientation tracker with sensor fusion & noise reduction
+    // 2. Update orientation tracker
     orientationTracker_.update(dt);
 
-    // 3. Build 3D perspective projection matrix (65° Field of View)
+    // 3. Build 3D Perspective Projection Matrix
     float aspect = (height_ > 0) ? (float)width_ / (float)height_ : 1.0f;
     float projectionMatrix[16];
     Utility::buildPerspectiveMatrix(projectionMatrix, 65.0f, aspect, 0.1f, 500.0f);
 
-    // 4. Retrieve smooth 3D camera view matrix from OrientationTracker
+    // 4. Build Camera View Matrix from Orientation Tracker
     float viewMatrix[16];
     orientationTracker_.getViewMatrix(viewMatrix);
 
-    // 5. Combine Projection * View into Model-View-Projection (MVP) matrix
-    float mvpMatrix[16];
-    Utility::multiplyMatrix4x4(projectionMatrix, viewMatrix, mvpMatrix);
+    // 5. Compute target point 12 units directly in front of camera
+    Vec3 targetPoint(viewMatrix[2], viewMatrix[6], viewMatrix[10]);
+    targetPoint *= -12.0f;
 
-    // Upload MVP matrix to shader
-    shader_->setProjectionMatrix(mvpMatrix);
+    // 6. Apply attraction forces pulling teapots towards target point
+    if (lightTeapot_ && heavyTeapot_) {
+        // Light teapot force
+        Vec3 lightDelta = targetPoint - lightTeapot_->position;
+        Vec3 lightForce = lightDelta * 18.0f - lightTeapot_->velocity * 2.5f;
+        lightTeapot_->applyForce(lightForce);
+
+        // Heavy teapot force
+        Vec3 heavyDelta = targetPoint - heavyTeapot_->position;
+        Vec3 heavyForce = heavyDelta * 22.0f - heavyTeapot_->velocity * 2.0f;
+        heavyTeapot_->applyForce(heavyForce);
+
+        // Integrate physics state
+        lightTeapot_->update(dt);
+        heavyTeapot_->update(dt);
+
+        // Resolve collision and momentum exchange
+        RigidBody::resolveCollision(*lightTeapot_, *heavyTeapot_);
+    }
 
     // Clear color and depth buffers
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    // Draw skybox models
-    if (!models_.empty()) {
-        for (const auto &model: models_) {
-            shader_->drawModel(model);
-        }
+    // A. Render Skybox
+    if (skyboxModel_) {
+        float skyboxMvp[16];
+        Utility::multiplyMatrix4x4(projectionMatrix, viewMatrix, skyboxMvp);
+        shader_->setProjectionMatrix(skyboxMvp);
+        shader_->setColor(1.0f, 1.0f, 1.0f, 1.0f);
+        shader_->drawModel(*skyboxModel_);
+    }
+
+    // B. Render Light Off-White Teapot
+    if (teapotModel_ && lightTeapot_) {
+        float modelMatrix[16], viewMvp[16], finalMvp[16];
+        lightTeapot_->getModelMatrix(modelMatrix);
+        Utility::multiplyMatrix4x4(viewMatrix, modelMatrix, viewMvp);
+        Utility::multiplyMatrix4x4(projectionMatrix, viewMvp, finalMvp);
+
+        shader_->setProjectionMatrix(finalMvp);
+        shader_->setColor(lightTeapot_->color.x, lightTeapot_->color.y, lightTeapot_->color.z, 1.0f);
+        shader_->drawModel(*teapotModel_);
+    }
+
+    // C. Render Heavy Dark Teapot
+    if (teapotModel_ && heavyTeapot_) {
+        float modelMatrix[16], viewMvp[16], finalMvp[16];
+        heavyTeapot_->getModelMatrix(modelMatrix);
+        Utility::multiplyMatrix4x4(viewMatrix, modelMatrix, viewMvp);
+        Utility::multiplyMatrix4x4(projectionMatrix, viewMvp, finalMvp);
+
+        shader_->setProjectionMatrix(finalMvp);
+        shader_->setColor(heavyTeapot_->color.x, heavyTeapot_->color.y, heavyTeapot_->color.z, 1.0f);
+        shader_->drawModel(*teapotModel_);
     }
 
     auto swapResult = eglSwapBuffers(display_, surface_);
@@ -168,7 +211,7 @@ void Renderer::initRenderer() {
     PRINT_GL_STRING_AS_LIST(GL_EXTENSIONS);
 
     shader_ = std::unique_ptr<Shader>(
-            Shader::loadShader(vertex, fragment, "inPosition", "inUV", "uProjection"));
+            Shader::loadShader(vertex, fragment, "inPosition", "inUV", "uProjection", "uColor"));
     assert(shader_);
 
     shader_->activate();
@@ -178,7 +221,7 @@ void Renderer::initRenderer() {
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LEQUAL);
 
-    // Create checkerboard skybox world
+    // Create scene models & physics objects
     createModels();
 }
 
@@ -199,10 +242,10 @@ void Renderer::updateRenderArea() {
 }
 
 void Renderer::createModels() {
-    float s = 50.0f; // Skybox cube radius/size
-    float t = 4.0f;  // Texture repeat factor (4x4 checkerboard grid per face)
-
-    std::vector<Vertex> vertices = {
+    // 1. Skybox Cube Model
+    float s = 50.0f;
+    float t = 4.0f;
+    std::vector<Vertex> skyboxVertices = {
         // Front Face (+Z)
         Vertex(Vector3{-s, -s,  s}, Vector2{0, 0}),
         Vertex(Vector3{ s, -s,  s}, Vector2{t, 0}),
@@ -240,21 +283,44 @@ void Renderer::createModels() {
         Vertex(Vector3{-s, -s,  s}, Vector2{0, t}),
     };
 
-    std::vector<Index> indices;
+    std::vector<Index> skyboxIndices;
     for (int i = 0; i < 6; ++i) {
         Index offset = static_cast<Index>(i * 4);
-        indices.push_back(offset + 0);
-        indices.push_back(offset + 1);
-        indices.push_back(offset + 2);
+        skyboxIndices.push_back(offset + 0);
+        skyboxIndices.push_back(offset + 1);
+        skyboxIndices.push_back(offset + 2);
 
-        indices.push_back(offset + 0);
-        indices.push_back(offset + 2);
-        indices.push_back(offset + 3);
+        skyboxIndices.push_back(offset + 0);
+        skyboxIndices.push_back(offset + 2);
+        skyboxIndices.push_back(offset + 3);
     }
 
-    // Generate procedural checkerboard texture
     auto checkerboardTexture = TextureAsset::createCheckerboardTexture(256, 256, 32);
-    models_.emplace_back(vertices, indices, checkerboardTexture);
+    skyboxModel_ = std::make_unique<Model>(skyboxVertices, skyboxIndices, checkerboardTexture);
+
+    // 2. Utah Teapot Mesh
+    auto [teapotVertices, teapotIndices] = TeapotModel::generateMesh(1.0f);
+    teapotModel_ = std::make_unique<Model>(teapotVertices, teapotIndices, checkerboardTexture);
+
+    // 3. Initialize Light Off-White Teapot Physics Object
+    // Mass: 1.0kg, Radius: 1.0m, Position: (0, -0.5, 6), Color: Off-White Cream
+    lightTeapot_ = std::make_unique<RigidBody>(
+        1.0f,
+        1.0f,
+        Vec3(0.0f, -0.5f, -6.0f),
+        Vec3(0.95f, 0.92f, 0.85f)
+    );
+    lightTeapot_->scale = 1.0f;
+
+    // 4. Initialize Heavy Dark Teapot Physics Object
+    // Mass: 25.0kg, Radius: 1.8m, Position: (0, 1.0, 24), Color: Dark Slate Charcoal
+    heavyTeapot_ = std::make_unique<RigidBody>(
+        25.0f,
+        1.8f,
+        Vec3(0.0f, 1.0f, -24.0f),
+        Vec3(0.22f, 0.20f, 0.26f)
+    );
+    heavyTeapot_->scale = 1.8f;
 }
 
 void Renderer::handleInput() {
