@@ -90,63 +90,110 @@ void Renderer::render() {
     float viewMatrix[16];
     orientationTracker_.getViewMatrix(viewMatrix);
 
-    // 5. Compute target point 12 units directly in front of camera
-    Vec3 targetPoint(viewMatrix[2], viewMatrix[6], viewMatrix[10]);
-    targetPoint *= -12.0f;
+    // 5. Get device look vector
+    Vec3 cameraVector(viewMatrix[2], viewMatrix[6], viewMatrix[10]);
 
-    // 6. Apply attraction forces pulling teapots towards target point
-    if (lightTeapot_ && heavyTeapot_) {
-        // Light teapot force
-        Vec3 lightDelta = targetPoint - lightTeapot_->position;
-        Vec3 lightForce = lightDelta * 18.0f - lightTeapot_->velocity * 2.5f;
-        lightTeapot_->applyForce(lightForce);
+    float phonePitch = 0.0f;
+    {
+        std::lock_guard<std::mutex> lock(gSensorMutex);
+        phonePitch = gSensorData.pitch;
+    }
 
-        // Heavy teapot force
-        Vec3 heavyDelta = targetPoint - heavyTeapot_->position;
-        Vec3 heavyForce = heavyDelta * 22.0f - heavyTeapot_->velocity * 2.0f;
-        heavyTeapot_->applyForce(heavyForce);
+    // 6. Update Physics & Player Ship (if not paused)
+    if (playerShip_ && !gGameSettings.isPaused) {
+        playerShip_->update(dt, cameraVector, phonePitch, viewMatrix);
 
-        // Integrate physics state
-        lightTeapot_->update(dt);
-        heavyTeapot_->update(dt);
+        // Update floating teapots & resolve collisions
+        for (size_t i = 0; i < floatingTeapots_.size(); ++i) {
+            floatingTeapots_[i]->update(dt);
 
-        // Resolve collision and momentum exchange
-        RigidBody::resolveCollision(*lightTeapot_, *heavyTeapot_);
+            // Collisions between player ship and teapots
+            RigidBody::resolveCollision(playerShip_->getRigidBody(), *floatingTeapots_[i]);
+
+            // Collisions between teapots
+            for (size_t j = i + 1; j < floatingTeapots_.size(); ++j) {
+                RigidBody::resolveCollision(*floatingTeapots_[i], *floatingTeapots_[j]);
+            }
+        }
+    }
+
+    // 7. Calculate Camera View Matrix: R_view = V_sensor * C
+    float viewRotation[16];
+    float finalViewMatrix[16];
+
+    if (playerShip_) {
+        // R_view = V_sensor * C
+        float unRot[16];
+        float temp[16];
+        playerShip_->getRigidBody().orientation.conjugate().toMatrix(unRot);
+        Utility::multiplyMatrix4x4(viewMatrix, playerShip_->getWorldOrienter(), temp);
+        Utility::multiplyMatrix4x4(unRot, temp, viewRotation);
+
+        // Include player ship position in View Matrix: V = R_view * T(-P_ship)
+        Vec3 p = playerShip_->getRigidBody().position;
+        for (int i = 0; i < 12; ++i) {
+            finalViewMatrix[i] = viewRotation[i];
+        }
+        finalViewMatrix[12] = -(viewRotation[0] * p.x + viewRotation[4] * p.y + viewRotation[8]  * p.z);
+        finalViewMatrix[13] = -(viewRotation[1] * p.x + viewRotation[5] * p.y + viewRotation[9]  * p.z);
+        finalViewMatrix[14] = -(viewRotation[2] * p.x + viewRotation[6] * p.y + viewRotation[10] * p.z);
+        finalViewMatrix[15] = 1.0f;
+    } else {
+        for (int i = 0; i < 16; ++i) {
+            viewRotation[i] = viewMatrix[i];
+            finalViewMatrix[i] = viewMatrix[i];
+        }
     }
 
     // Clear color and depth buffers
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    // A. Render Skybox
+    // A. Render Skybox (rotation around camera only)
     if (skyboxModel_) {
         float skyboxMvp[16];
-        Utility::multiplyMatrix4x4(projectionMatrix, viewMatrix, skyboxMvp);
+        Utility::multiplyMatrix4x4(projectionMatrix, viewRotation, skyboxMvp);
         shader_->setProjectionMatrix(skyboxMvp);
         shader_->setColor(1.0f, 1.0f, 1.0f, 1.0f);
         shader_->drawModel(*skyboxModel_);
     }
 
-    // B. Render Light Off-White Teapot
-    if (teapotModel_ && lightTeapot_) {
-        float modelMatrix[16], viewMvp[16], finalMvp[16];
-        lightTeapot_->getModelMatrix(modelMatrix);
-        Utility::multiplyMatrix4x4(viewMatrix, modelMatrix, viewMvp);
-        Utility::multiplyMatrix4x4(projectionMatrix, viewMvp, finalMvp);
+    // B. Render Floating Teapots in World Space
+    if (teapotModel_ && playerShip_) {
+        for (const auto &teapot : floatingTeapots_) {
+            float modelMatrix[16], viewMvp[16], finalMvp[16];
+            teapot->getModelMatrix(modelMatrix);
+            Utility::multiplyMatrix4x4(finalViewMatrix, modelMatrix, viewMvp);
+            Utility::multiplyMatrix4x4(projectionMatrix, viewMvp, finalMvp);
 
-        shader_->setProjectionMatrix(finalMvp);
-        shader_->setColor(lightTeapot_->color.x, lightTeapot_->color.y, lightTeapot_->color.z, 1.0f);
-        shader_->drawModel(*teapotModel_);
+            shader_->setProjectionMatrix(finalMvp);
+            shader_->setColor(teapot->color.x, teapot->color.y, teapot->color.z, 1.0f);
+            shader_->drawModel(*teapotModel_);
+        }
     }
 
-    // C. Render Heavy Dark Teapot
-    if (teapotModel_ && heavyTeapot_) {
+    // C. Render Flight Direction / Ship Nose Reticle (Positioned in front of ship in world space)
+    if (teapotModel_ && playerShip_) {
+        float shipMatrix[16];
+        playerShip_->getRigidBody().orientation.toMatrix(shipMatrix);
+
+        // Forward look direction from ship orientation basis (-Z column)
+        Vec3 forwardDir(-shipMatrix[8], -shipMatrix[9], -shipMatrix[10]);
+
+        // Position crosshair 6.0 units directly ahead of ship in world space
+        Vec3 crosshairPos = playerShip_->getRigidBody().position + forwardDir * 6.0f;
+
+        RigidBody crosshairBody(0.0f, 0.1f, crosshairPos, Vec3(0.1f, 0.95f, 0.4f));
+        crosshairBody.orientation = playerShip_->getRigidBody().orientation;
+        crosshairBody.scale = 0.12f;
+
         float modelMatrix[16], viewMvp[16], finalMvp[16];
-        heavyTeapot_->getModelMatrix(modelMatrix);
-        Utility::multiplyMatrix4x4(viewMatrix, modelMatrix, viewMvp);
+        crosshairBody.getModelMatrix(modelMatrix);
+
+        Utility::multiplyMatrix4x4(finalViewMatrix, modelMatrix, viewMvp);
         Utility::multiplyMatrix4x4(projectionMatrix, viewMvp, finalMvp);
 
         shader_->setProjectionMatrix(finalMvp);
-        shader_->setColor(heavyTeapot_->color.x, heavyTeapot_->color.y, heavyTeapot_->color.z, 1.0f);
+        shader_->setColor(0.1f, 0.95f, 0.4f, 1.0f); // Bright Neon Cyan-Green
         shader_->drawModel(*teapotModel_);
     }
 
@@ -242,9 +289,12 @@ void Renderer::updateRenderArea() {
 }
 
 void Renderer::createModels() {
-    // 1. Skybox Cube Model
-    float s = 50.0f;
-    float t = 4.0f;
+    // 1. Player Ship Physics Object
+    playerShip_ = std::make_unique<PlayerShip>();
+
+    // 2. Skybox Cube Model
+    float s = 100.0f;
+    float t = 8.0f;
     std::vector<Vertex> skyboxVertices = {
         // Front Face (+Z)
         Vertex(Vector3{-s, -s,  s}, Vector2{0, 0}),
@@ -298,29 +348,37 @@ void Renderer::createModels() {
     auto checkerboardTexture = TextureAsset::createCheckerboardTexture(256, 256, 32);
     skyboxModel_ = std::make_unique<Model>(skyboxVertices, skyboxIndices, checkerboardTexture);
 
-    // 2. Utah Teapot Mesh
+    // 3. Utah Teapot Mesh
     auto [teapotVertices, teapotIndices] = TeapotModel::generateMesh(1.0f);
     teapotModel_ = std::make_unique<Model>(teapotVertices, teapotIndices, checkerboardTexture);
 
-    // 3. Initialize Light Off-White Teapot Physics Object
-    // Mass: 1.0kg, Radius: 1.0m, Position: (0, -0.5, 6), Color: Off-White Cream
-    lightTeapot_ = std::make_unique<RigidBody>(
-        1.0f,
-        1.0f,
-        Vec3(0.0f, -0.5f, -6.0f),
-        Vec3(0.95f, 0.92f, 0.85f)
-    );
-    lightTeapot_->scale = 1.0f;
+    // 4. Spawn 25 floating teapots scattered in space
+    floatingTeapots_.clear();
+    for (int i = 0; i < 25; ++i) {
+        float angle = (float)i / 25.0f * 6.2831853f;
+        float dist = 20.0f + (i % 5) * 15.0f;
+        float x = cosf(angle) * dist + ((i % 3) - 1) * 8.0f;
+        float y = sinf(angle * 2.0f) * 10.0f + ((i % 4) - 2) * 5.0f;
+        float z = -15.0f - (i * 6.0f);
 
-    // 4. Initialize Heavy Dark Teapot Physics Object
-    // Mass: 25.0kg, Radius: 1.8m, Position: (0, 1.0, 24), Color: Dark Slate Charcoal
-    heavyTeapot_ = std::make_unique<RigidBody>(
-        25.0f,
-        1.8f,
-        Vec3(0.0f, 1.0f, -24.0f),
-        Vec3(0.22f, 0.20f, 0.26f)
-    );
-    heavyTeapot_->scale = 1.8f;
+        float mass = 1.0f + (i % 6) * 5.0f; // 1kg to 26kg
+        float radius = 1.2f + (i % 4) * 0.4f;
+
+        Vec3 colors[] = {
+            Vec3(0.95f, 0.78f, 0.3f), // Gold
+            Vec3(0.85f, 0.45f, 0.2f), // Copper
+            Vec3(0.35f, 0.4f, 0.5f),  // Slate
+            Vec3(0.9f, 0.9f, 0.95f),  // Silver
+            Vec3(0.85f, 0.25f, 0.25f),// Crimson
+            Vec3(0.2f, 0.85f, 0.95f)  // Cyan
+        };
+        Vec3 color = colors[i % 6];
+
+        auto teapot = std::make_unique<RigidBody>(mass, radius, Vec3(x, y, z), color);
+        teapot->scale = radius;
+        teapot->angularVelocity = Vec3((i % 3 - 1) * 0.2f, (i % 2 - 0.5f) * 0.4f, (i % 4 - 2) * 0.15f);
+        floatingTeapots_.push_back(std::move(teapot));
+    }
 }
 
 void Renderer::handleInput() {

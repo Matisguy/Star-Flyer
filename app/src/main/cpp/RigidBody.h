@@ -56,6 +56,10 @@ struct Quaternion {
         };
     }
 
+    Quaternion conjugate() const {
+        return {w, -x, -y, -z};
+    }
+
     void normalize() {
         float lenSq = w * w + x * x + y * y + z * z;
         if (lenSq > 0.000001f) {

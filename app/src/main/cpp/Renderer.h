@@ -10,6 +10,8 @@
 #include "OrientationTracker.h"
 #include "TimeStep.h"
 #include "RigidBody.h"
+#include "PlayerShip.h"
+#include "GameSettings.h"
 
 struct android_app;
 
@@ -31,32 +33,12 @@ public:
 
     virtual ~Renderer();
 
-    /*!
-     * Handles input from the android_app.
-     *
-     * Note: this will clear the input queue
-     */
     void handleInput();
-
-    /*!
-     * Renders all the models in the renderer
-     */
     void render();
 
 private:
-    /*!
-     * Performs necessary OpenGL initialization.
-     */
     void initRenderer();
-
-    /*!
-     * @brief Check every frame to see if the framebuffer has changed size
-     */
     void updateRenderArea();
-
-    /*!
-     * Creates scene models (Skybox and Teapot meshes)
-     */
     void createModels();
 
     android_app *app_;
@@ -73,13 +55,13 @@ private:
     OrientationTracker orientationTracker_;
     TimeStep timeStep_;
 
-    // Skybox and Teapot models
+    // Models & Player Ship
     std::unique_ptr<Model> skyboxModel_;
     std::unique_ptr<Model> teapotModel_;
+    std::unique_ptr<Model> crosshairModel_;
 
-    // Physics objects
-    std::unique_ptr<RigidBody> lightTeapot_;
-    std::unique_ptr<RigidBody> heavyTeapot_;
+    std::unique_ptr<PlayerShip> playerShip_;
+    std::vector<std::unique_ptr<RigidBody>> floatingTeapots_;
 };
 
 #endif //ANDROIDGLINVESTIGATIONS_RENDERER_H

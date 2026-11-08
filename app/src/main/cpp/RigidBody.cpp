@@ -56,7 +56,7 @@ void RigidBody::getModelMatrix(float *outMatrix) const {
     // 1. Convert normalized unit quaternion to 3x3 rotation basis
     orientation.toMatrix(outMatrix, scale);
 
-    // 2. Set translation in column 3
+    // 2. Set world translation in column 3
     outMatrix[12] = position.x;
     outMatrix[13] = position.y;
     outMatrix[14] = position.z;

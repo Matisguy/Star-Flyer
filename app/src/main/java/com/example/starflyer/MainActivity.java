@@ -11,11 +11,10 @@ import android.util.TypedValue;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
-import android.widget.TextView;
+import android.widget.Button;
+import android.widget.RelativeLayout;
 
 import com.google.androidgamesdk.GameActivity;
-
-import java.util.Locale;
 
 public class MainActivity extends GameActivity implements SensorEventListener {
     static {
@@ -38,17 +37,18 @@ public class MainActivity extends GameActivity implements SensorEventListener {
     private float roll = 0f;
     private float yaw = 0f;
 
-    private TextView debugTextView;
-    private long lastUiUpdateTimestamp = 0;
-    private static final long UI_UPDATE_INTERVAL_MS = 50; // Update UI ~20 times per second
+    private boolean isPaused = false;
 
-    // Native JNI call to bridge sensor data to C++ game logic
+    // Native JNI calls to bridge sensor data and UI actions to C++ game logic
     public native void updateNativeSensors(
             float accelX, float accelY, float accelZ,
             float gyroX, float gyroY, float gyroZ,
             float magX, float magY, float magZ,
             float pitch, float roll, float yaw
     );
+
+    public native void nativeRequestCalibration();
+    public native void nativeTogglePause();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -62,24 +62,61 @@ public class MainActivity extends GameActivity implements SensorEventListener {
             magnetometer = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD);
             rotationVector = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR);
             if (rotationVector == null) {
-                // Fallback to game rotation vector if standard rotation vector is unavailable
                 rotationVector = sensorManager.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR);
             }
         }
 
-        // Create overlay TextView for debug menu
-        debugTextView = new TextView(this);
-        debugTextView.setTextColor(Color.GREEN);
-        debugTextView.setBackgroundColor(Color.argb(180, 0, 0, 0)); // Semi-transparent black background
-        debugTextView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        debugTextView.setTypeface(Typeface.MONOSPACE);
-        debugTextView.setPadding(32, 48, 32, 32);
-        debugTextView.setText("Initializing Sensor Debug Menu...");
+        // Setup HUD UI Overlay
+        RelativeLayout uiOverlay = new RelativeLayout(this);
 
-        // Add overlay on top of GameActivity native view
-        addContentView(debugTextView, new ViewGroup.LayoutParams(
+        // Calibrate Button
+        Button calibrateBtn = new Button(this);
+        calibrateBtn.setText("🎯 CALIBRATE");
+        calibrateBtn.setTextColor(Color.CYAN);
+        calibrateBtn.setBackgroundColor(Color.argb(180, 20, 25, 40));
+        calibrateBtn.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        calibrateBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+
+        RelativeLayout.LayoutParams calParams = new RelativeLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        calParams.addRule(RelativeLayout.ALIGN_PARENT_RIGHT);
+        calParams.addRule(RelativeLayout.ALIGN_PARENT_TOP);
+        calParams.setMargins(0, 48, 48, 0);
+        calibrateBtn.setLayoutParams(calParams);
+        calibrateBtn.setOnClickListener(v -> nativeRequestCalibration());
+
+        // Pause / Resume Button
+        Button pauseBtn = new Button(this);
+        pauseBtn.setText("⏸️ PAUSE");
+        pauseBtn.setTextColor(Color.WHITE);
+        pauseBtn.setBackgroundColor(Color.argb(180, 20, 25, 40));
+        pauseBtn.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        pauseBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+
+        RelativeLayout.LayoutParams pauseParams = new RelativeLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        pauseParams.addRule(RelativeLayout.ALIGN_PARENT_LEFT);
+        pauseParams.addRule(RelativeLayout.ALIGN_PARENT_TOP);
+        pauseParams.setMargins(48, 48, 0, 0);
+        pauseBtn.setLayoutParams(pauseParams);
+
+        pauseBtn.setOnClickListener(v -> {
+            isPaused = !isPaused;
+            pauseBtn.setText(isPaused ? "▶️ RESUME" : "⏸️ PAUSE");
+            nativeTogglePause();
+        });
+
+        uiOverlay.addView(calibrateBtn);
+        uiOverlay.addView(pauseBtn);
+
+        // Add UI Overlay on top of GameActivity View
+        addContentView(uiOverlay, new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
         ));
     }
 
@@ -124,13 +161,11 @@ public class MainActivity extends GameActivity implements SensorEventListener {
             SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values);
             SensorManager.getOrientation(rotationMatrix, orientationAngles);
 
-            // Azimuth (yaw), Pitch, Roll in radians -> converted to degrees
             yaw = (float) Math.toDegrees(orientationAngles[0]);
             pitch = (float) Math.toDegrees(orientationAngles[1]);
             roll = (float) Math.toDegrees(orientationAngles[2]);
         }
 
-        // Send sensor values to C++ native layer
         try {
             updateNativeSensors(
                     accelValues[0], accelValues[1], accelValues[2],
@@ -141,49 +176,11 @@ public class MainActivity extends GameActivity implements SensorEventListener {
         } catch (UnsatisfiedLinkError ignored) {
             // Native function not linked yet or optional
         }
-
-        // Throttle UI update to ~20 FPS for optimal rendering performance
-        long now = System.currentTimeMillis();
-        if (now - lastUiUpdateTimestamp >= UI_UPDATE_INTERVAL_MS) {
-            lastUiUpdateTimestamp = now;
-            updateDebugDisplay();
-        }
-    }
-
-    private void updateDebugDisplay() {
-        if (debugTextView == null) return;
-
-        String accelStatus = (accelerometer != null)
-                ? String.format(Locale.US, "X:%+6.2f  Y:%+6.2f  Z:%+6.2f m/s²", accelValues[0], accelValues[1], accelValues[2])
-                : "NOT AVAILABLE";
-
-        String gyroStatus = (gyroscope != null)
-                ? String.format(Locale.US, "X:%+6.2f  Y:%+6.2f  Z:%+6.2f rad/s", gyroValues[0], gyroValues[1], gyroValues[2])
-                : "NOT AVAILABLE";
-
-        String magStatus = (magnetometer != null)
-                ? String.format(Locale.US, "X:%+6.1f  Y:%+6.1f  Z:%+6.1f μT", magValues[0], magValues[1], magValues[2])
-                : "NOT AVAILABLE";
-
-        String tiltStatus = (rotationVector != null)
-                ? String.format(Locale.US, "Pitch:%+6.1f°  Roll:%+6.1f°  Yaw:%+6.1f°", pitch, roll, yaw)
-                : "NOT AVAILABLE";
-
-        String debugText = String.format(Locale.US,
-                "\n \n === STAR FLYER SENSOR DEBUG ===\n" +
-                "ACCEL: %s\n" +
-                "GYRO : %s\n" +
-                "MAG  : %s\n" +
-                "TILT : %s",
-                accelStatus, gyroStatus, magStatus, tiltStatus
-        );
-
-        debugTextView.setText(debugText);
     }
 
     @Override
     public void onAccuracyChanged(Sensor sensor, int accuracy) {
-        // Not needed for basic readings
+        // Not needed
     }
 
     @Override

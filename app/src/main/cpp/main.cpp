@@ -7,11 +7,25 @@
 #include "Renderer.h"
 #include "SensorData.h"
 
+#include "GameSettings.h"
+
 // Global sensor state accessible across C++ native components
 SensorData gSensorData;
 std::mutex gSensorMutex;
 
 extern "C" {
+
+JNIEXPORT void JNICALL
+Java_com_example_starflyer_MainActivity_nativeRequestCalibration(
+        JNIEnv *env, jobject thiz) {
+    gGameSettings.calibrationRequested = true;
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_starflyer_MainActivity_nativeTogglePause(
+        JNIEnv *env, jobject thiz) {
+    gGameSettings.isPaused = !gGameSettings.isPaused;
+}
 
 JNIEXPORT void JNICALL
 Java_com_example_starflyer_MainActivity_updateNativeSensors(
