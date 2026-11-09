@@ -31,8 +31,6 @@ void PlayerShip::calibrate(const float viewSensorMatrix[16]) {
     rShipT[8] = shipMatrix[2]; rShipT[9] = shipMatrix[6]; rShipT[10] = shipMatrix[10]; rShipT[11] = 0.0f;
     rShipT[12] = 0.0f; rShipT[13] = 0.0f; rShipT[14] = 0.0f; rShipT[15] = 1.0f;
 
-    // 3. Calibration Matrix C = V_calib^T * R_ship^T
-    Utility::multiplyMatrix4x4(vCalibT, rShipT, worldOrienter_);
     for (int i = 0; i < 16; ++i) {
         worldOrienter_[i] = vCalibT[i];
     }
@@ -42,7 +40,7 @@ void PlayerShip::calibrate(const float viewSensorMatrix[16]) {
     }
 }
 
-void PlayerShip::update(float dt, const Vec3 &cameraVector, float phonePitch, const float viewSensorMatrix[16]) {
+void PlayerShip::update(float dt, const Vec3 &cameraVector, const float viewSensorMatrix[16]) {
     if (!initialized_) {
         calibrate(viewSensorMatrix);
         initialized_ = true;
@@ -66,6 +64,9 @@ void PlayerShip::update(float dt, const Vec3 &cameraVector, float phonePitch, co
     // Tilt look direction in local camera space
     float dx = deltaV[8];
     float dy = deltaV[9];
+
+    // camera roll in camera space?
+    float roll = deltaV[4]-deltaV[1];
 
     // Local steering torque: (dy * sensitivity, -dx * sensitivity, 0)
     Vec3 localTorque(

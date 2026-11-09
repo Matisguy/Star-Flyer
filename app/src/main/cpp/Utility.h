@@ -62,7 +62,7 @@ public:
 
     static float *buildIdentityMatrix(float *outMatrix);
 
-    static float *normalizeVector(float *vector);
+    static float *normalizeVector(float *vector, int length);
 };
 
 #endif //ANDROIDGLINVESTIGATIONS_UTILITY_H

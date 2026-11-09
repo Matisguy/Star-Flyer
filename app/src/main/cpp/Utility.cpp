@@ -221,13 +221,13 @@ float *Utility::buildMatrixFromVectors(float *outMatrix, float *dirVector, float
     return outMatrix;
 }
 
-float *Utility::normalizeVector(float *vector) {
+float *Utility::normalizeVector(float *vector, int length) {
     float temp = 0.f;
-    for (int i = 0; i < 3; ++i) {   //norm get
+    for (int i = 0; i < length; ++i) {   //norm get
         temp += vector[i] * vector[i];
     }
     temp = 1.0f/sqrt(temp);
-    for (int i = 0; i < 3; ++i) {   //normalize
+    for (int i = 0; i < length; ++i) {   //normalize
         vector[i] = vector[i] * temp;
     }
     return vector;

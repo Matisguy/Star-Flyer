@@ -93,15 +93,12 @@ void Renderer::render() {
     // 5. Get device look vector
     Vec3 cameraVector(viewMatrix[2], viewMatrix[6], viewMatrix[10]);
 
-    float phonePitch = 0.0f;
-    {
-        std::lock_guard<std::mutex> lock(gSensorMutex);
-        phonePitch = gSensorData.pitch;
-    }
+    // 6. Update Physics & Player Ship (if playing and not paused)
+    bool isPlaying = (gGameSettings.gameState == GameState::PLAYING);
+    bool isPaused  = (gGameSettings.gameState == GameState::PAUSED || gGameSettings.isPaused);
 
-    // 6. Update Physics & Player Ship (if not paused)
-    if (playerShip_ && !gGameSettings.isPaused) {
-        playerShip_->update(dt, cameraVector, phonePitch, viewMatrix);
+    if (playerShip_ && isPlaying && !isPaused) {
+        playerShip_->update(dt, cameraVector, viewMatrix);
 
         // Update floating teapots & resolve collisions
         for (size_t i = 0; i < floatingTeapots_.size(); ++i) {
@@ -115,6 +112,11 @@ void Renderer::render() {
                 RigidBody::resolveCollision(*floatingTeapots_[i], *floatingTeapots_[j]);
             }
         }
+    } else if (!isPlaying && !isPaused) {
+        // Slow ambient rotation of floating teapots when in menus
+        for (size_t i = 0; i < floatingTeapots_.size(); ++i) {
+            floatingTeapots_[i]->update(dt * 0.3f);
+        }
     }
 
     // 7. Calculate Camera View Matrix: R_view = V_sensor * C
@@ -126,8 +128,8 @@ void Renderer::render() {
         float unRot[16];
         float temp[16];
         playerShip_->getRigidBody().orientation.conjugate().toMatrix(unRot);
-        Utility::multiplyMatrix4x4(viewMatrix, playerShip_->getWorldOrienter(), temp);
-        Utility::multiplyMatrix4x4(unRot, temp, viewRotation);
+        Utility::multiplyMatrix4x4(playerShip_->getWorldOrienter(), unRot, temp);
+        Utility::multiplyMatrix4x4(viewMatrix, temp, viewRotation);
 
         // Include player ship position in View Matrix: V = R_view * T(-P_ship)
         Vec3 p = playerShip_->getRigidBody().position;

@@ -9,7 +9,7 @@ class PlayerShip {
 public:
     PlayerShip();
 
-    void update(float dt, const Vec3 &cameraVector, float phonePitch, const float viewMatrix[16]);
+    void update(float dt, const Vec3 &cameraVector, const float viewMatrix[16]);
     void calibrate(const float viewMatrix[16]);
 
     RigidBody& getRigidBody() { return *rigidBody_; }

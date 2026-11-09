@@ -24,14 +24,11 @@ public:
      */
     void getGravity(float out[3]) const;
 
-    /**
-     * Gets current smoothed magnetic north vector
-     */
-    void getNorth(float out[3]) const;
+    void getDeviceOrientation(float out[4]) const;
 
 private:
     float grav_[3]  = {0.0f, 9.81f, 0.0f};
-    float north_[3] = {0.0f, 0.0f, 1.0f};
+    float orient_[4] = {1.0f, 0.0f, 0.0f, 0.0f};
     bool initialized_ = false;
 };
 

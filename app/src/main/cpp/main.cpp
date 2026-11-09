@@ -25,31 +25,56 @@ JNIEXPORT void JNICALL
 Java_com_example_starflyer_MainActivity_nativeTogglePause(
         JNIEnv *env, jobject thiz) {
     gGameSettings.isPaused = !gGameSettings.isPaused;
+    if (gGameSettings.isPaused) {
+        gGameSettings.gameState = GameState::PAUSED;
+    } else {
+        gGameSettings.gameState = GameState::PLAYING;
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_starflyer_MainActivity_nativeSetGameState(
+        JNIEnv *env, jobject thiz, jint state) {
+    gGameSettings.gameState = static_cast<GameState>(state);
+    if (gGameSettings.gameState == GameState::PAUSED) {
+        gGameSettings.isPaused = true;
+    } else if (gGameSettings.gameState == GameState::PLAYING) {
+        gGameSettings.isPaused = false;
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_starflyer_MainActivity_nativeSetAudioSettings(
+        JNIEnv *env, jobject thiz, jfloat musicVol, jfloat sfxVol) {
+    gGameSettings.musicVolume = musicVol;
+    gGameSettings.sfxVolume = sfxVol;
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_starflyer_MainActivity_nativeSetSensitivity(
+        JNIEnv *env, jobject thiz, jfloat turnSens) {
+    gGameSettings.turnSensitivity = turnSens;
 }
 
 JNIEXPORT void JNICALL
 Java_com_example_starflyer_MainActivity_updateNativeSensors(
         JNIEnv *env, jobject thiz,
-        jfloat accelX, jfloat accelY, jfloat accelZ,
+        jfloat gravX, jfloat gravY, jfloat gravZ,
         jfloat gyroX, jfloat gyroY, jfloat gyroZ,
-        jfloat magX, jfloat magY, jfloat magZ,
-        jfloat pitch, jfloat roll, jfloat yaw) {
+        jfloat rotX, jfloat rotY, jfloat rotZ, jfloat rotW) {
     std::lock_guard<std::mutex> lock(gSensorMutex);
-    gSensorData.accel[0] = accelX;
-    gSensorData.accel[1] = accelY;
-    gSensorData.accel[2] = accelZ;
+    gSensorData.grav[0] = gravX;
+    gSensorData.grav[1] = gravY;
+    gSensorData.grav[2] = gravZ;
 
     gSensorData.gyro[0] = gyroX;
     gSensorData.gyro[1] = gyroY;
     gSensorData.gyro[2] = gyroZ;
 
-    gSensorData.mag[0] = magX;
-    gSensorData.mag[1] = magY;
-    gSensorData.mag[2] = magZ;
-
-    gSensorData.pitch = pitch;
-    gSensorData.roll = roll;
-    gSensorData.yaw = yaw;
+    gSensorData.orientation[0] = rotX;
+    gSensorData.orientation[1] = rotY;
+    gSensorData.orientation[2] = rotZ;
+    gSensorData.orientation[3] = rotW;
 }
 
 /*!
