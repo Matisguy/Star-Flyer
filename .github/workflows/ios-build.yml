@@ -31,7 +31,20 @@ jobs:
           set -euo pipefail
 
           KEY_PATH="$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8"
-          printf '%s\n' "$ASC_KEY_P8" > "$KEY_PATH"
+
+          # Rebuild the PEM layout, which pasting into a secret can damage (e.g. CRLF line endings).
+          KEY_BODY=$(printf '%s' "$ASC_KEY_P8" | sed -e 's/\\n//g' -e 's/-----[A-Z ]*-----//g' | tr -d ' \t\r\n')
+          {
+            echo '-----BEGIN PRIVATE KEY-----'
+            printf '%s' "$KEY_BODY" | fold -w 64
+            echo
+            echo '-----END PRIVATE KEY-----'
+          } > "$KEY_PATH"
+          if ! openssl pkey -in "$KEY_PATH" -noout; then
+            echo "::error::ASC_KEY_P8 is not a valid private key (${#KEY_BODY} characters after cleanup; a .p8 key has about 190)."
+            exit 1
+          fi
+
           ARCHIVE_PATH="$RUNNER_TEMP/StarFlyer.xcarchive"
           LOG_PATH="$RUNNER_TEMP/xcodebuild.log"
 
