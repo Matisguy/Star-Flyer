@@ -1,40 +1,34 @@
 #ifndef ANDROIDGLINVESTIGATIONS_TEXTUREASSET_H
 #define ANDROIDGLINVESTIGATIONS_TEXTUREASSET_H
 
+#include <SDL3/SDL.h>
 #include <memory>
-#include <android/asset_manager.h>
-#include <GLES3/gl3.h>
-#include <string>
-#include <vector>
 
 class TextureAsset {
 public:
-    /*!
-     * Loads a texture asset from the assets/ directory
-     * @param assetManager Asset manager to use
-     * @param assetPath The path to the asset
-     * @return a shared pointer to a texture asset, resources will be reclaimed when it's cleaned up
-     */
-    static std::shared_ptr<TextureAsset>
-    loadAsset(AAssetManager *assetManager, const std::string &assetPath);
-
     /**
      * Generates a procedural checkerboard texture for the skybox / placeholder rendering
      */
     static std::shared_ptr<TextureAsset>
-    createCheckerboardTexture(int width = 256, int height = 256, int checkSize = 32);
+    createCheckerboardTexture(
+            SDL_GPUDevice *device,
+            int width = 256,
+            int height = 256,
+            int checkSize = 32);
 
     ~TextureAsset();
 
-    /*!
-     * @return the texture id for use with OpenGL
-     */
-    constexpr GLuint getTextureID() const { return textureID_; }
+    SDL_GPUTexture *getTexture() const { return texture_; }
+
+    SDL_GPUSampler *getSampler() const { return sampler_; }
 
 private:
-    inline TextureAsset(GLuint textureId) : textureID_(textureId) {}
+    TextureAsset(SDL_GPUDevice *device, SDL_GPUTexture *texture, SDL_GPUSampler *sampler)
+            : device_(device), texture_(texture), sampler_(sampler) {}
 
-    GLuint textureID_;
+    SDL_GPUDevice *device_;
+    SDL_GPUTexture *texture_;
+    SDL_GPUSampler *sampler_;
 };
 
 #endif //ANDROIDGLINVESTIGATIONS_TEXTUREASSET_H

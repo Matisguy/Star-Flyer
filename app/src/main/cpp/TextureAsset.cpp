@@ -1,80 +1,11 @@
-#include <android/imagedecoder.h>
 #include "TextureAsset.h"
-#include "AndroidOut.h"
-#include "Utility.h"
+
+#include <cstdint>
+#include <vector>
 
 std::shared_ptr<TextureAsset>
-TextureAsset::loadAsset(AAssetManager *assetManager, const std::string &assetPath) {
-    // Get the image from asset manager
-    auto pAndroidRobotPng = AAssetManager_open(
-            assetManager,
-            assetPath.c_str(),
-            AASSET_MODE_BUFFER);
-
-    // Make a decoder to turn it into a texture
-    AImageDecoder *pAndroidDecoder = nullptr;
-    auto result = AImageDecoder_createFromAAsset(pAndroidRobotPng, &pAndroidDecoder);
-    assert(result == ANDROID_IMAGE_DECODER_SUCCESS);
-
-    // make sure we get 8 bits per channel out. RGBA order.
-    AImageDecoder_setAndroidBitmapFormat(pAndroidDecoder, ANDROID_BITMAP_FORMAT_RGBA_8888);
-
-    // Get the image header, to help set everything up
-    const AImageDecoderHeaderInfo *pAndroidHeader = nullptr;
-    pAndroidHeader = AImageDecoder_getHeaderInfo(pAndroidDecoder);
-
-    // important metrics for sending to GL
-    auto width = AImageDecoderHeaderInfo_getWidth(pAndroidHeader);
-    auto height = AImageDecoderHeaderInfo_getHeight(pAndroidHeader);
-    auto stride = AImageDecoder_getMinimumStride(pAndroidDecoder);
-
-    // Get the bitmap data of the image
-    auto upAndroidImageData = std::make_unique<std::vector<uint8_t>>(height * stride);
-    auto decodeResult = AImageDecoder_decodeImage(
-            pAndroidDecoder,
-            upAndroidImageData->data(),
-            stride,
-            upAndroidImageData->size());
-    assert(decodeResult == ANDROID_IMAGE_DECODER_SUCCESS);
-
-    // Get an opengl texture
-    GLuint textureId;
-    glGenTextures(1, &textureId);
-    glBindTexture(GL_TEXTURE_2D, textureId);
-
-    // Clamp to the edge, you'll get odd results alpha blending if you don't
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-    // Load the texture into VRAM
-    glTexImage2D(
-            GL_TEXTURE_2D, // target
-            0, // mip level
-            GL_RGBA, // internal format, often advisable to use BGR
-            width, // width of the texture
-            height, // height of the texture
-            0, // border (always 0)
-            GL_RGBA, // format
-            GL_UNSIGNED_BYTE, // type
-            upAndroidImageData->data() // Data to upload
-    );
-
-    // generate mip levels. Not really needed for 2D, but good to do
-    glGenerateMipmap(GL_TEXTURE_2D);
-
-    // cleanup helpers
-    AImageDecoder_delete(pAndroidDecoder);
-    AAsset_close(pAndroidRobotPng);
-
-    // Create a shared pointer so it can be cleaned up easily/automatically
-    return std::shared_ptr<TextureAsset>(new TextureAsset(textureId));
-}
-
-std::shared_ptr<TextureAsset>
-TextureAsset::createCheckerboardTexture(int width, int height, int checkSize) {
+TextureAsset::createCheckerboardTexture(
+        SDL_GPUDevice *device, int width, int height, int checkSize) {
     std::vector<uint8_t> pixels(width * height * 4);
     for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
@@ -93,36 +24,67 @@ TextureAsset::createCheckerboardTexture(int width, int height, int checkSize) {
         }
     }
 
-    GLuint textureId;
-    glGenTextures(1, &textureId);
-    glBindTexture(GL_TEXTURE_2D, textureId);
+    Uint32 mipLevels = 1;
+    for (int size = SDL_max(width, height); size > 1; size /= 2) {
+        ++mipLevels;
+    }
 
+    SDL_GPUTextureCreateInfo textureInfo = {};
+    textureInfo.type = SDL_GPU_TEXTURETYPE_2D;
+    textureInfo.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+    // Mipmap generation renders into the texture, so it must also be a color target.
+    textureInfo.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
+    textureInfo.width = width;
+    textureInfo.height = height;
+    textureInfo.layer_count_or_depth = 1;
+    textureInfo.num_levels = mipLevels;
+    SDL_GPUTexture *texture = SDL_CreateGPUTexture(device, &textureInfo);
+
+    SDL_GPUTransferBufferCreateInfo transferInfo = {};
+    transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    transferInfo.size = static_cast<Uint32>(pixels.size());
+    SDL_GPUTransferBuffer *transfer = SDL_CreateGPUTransferBuffer(device, &transferInfo);
+
+    void *mapped = SDL_MapGPUTransferBuffer(device, transfer, false);
+    SDL_memcpy(mapped, pixels.data(), pixels.size());
+    SDL_UnmapGPUTransferBuffer(device, transfer);
+
+    SDL_GPUCommandBuffer *commandBuffer = SDL_AcquireGPUCommandBuffer(device);
+    SDL_GPUCopyPass *copyPass = SDL_BeginGPUCopyPass(commandBuffer);
+
+    SDL_GPUTextureTransferInfo source = {};
+    source.transfer_buffer = transfer;
+    source.pixels_per_row = width;
+    source.rows_per_layer = height;
+
+    SDL_GPUTextureRegion destination = {};
+    destination.texture = texture;
+    destination.w = width;
+    destination.h = height;
+    destination.d = 1;
+
+    SDL_UploadToGPUTexture(copyPass, &source, &destination, false);
+    SDL_EndGPUCopyPass(copyPass);
+    SDL_GenerateMipmapsForGPUTexture(commandBuffer, texture);
+    SDL_SubmitGPUCommandBuffer(commandBuffer);
+    SDL_ReleaseGPUTransferBuffer(device, transfer);
+
+    SDL_GPUSamplerCreateInfo samplerInfo = {};
+    samplerInfo.min_filter = SDL_GPU_FILTER_LINEAR;
+    samplerInfo.mag_filter = SDL_GPU_FILTER_LINEAR;
+    samplerInfo.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_LINEAR;
     // Repeat mode for tiled skybox faces
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    samplerInfo.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
+    samplerInfo.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
+    samplerInfo.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
+    // Zero would clamp sampling to the top mip level.
+    samplerInfo.max_lod = static_cast<float>(mipLevels);
+    SDL_GPUSampler *sampler = SDL_CreateGPUSampler(device, &samplerInfo);
 
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-    glTexImage2D(
-            GL_TEXTURE_2D,
-            0,
-            GL_RGBA,
-            width,
-            height,
-            0,
-            GL_RGBA,
-            GL_UNSIGNED_BYTE,
-            pixels.data()
-    );
-
-    glGenerateMipmap(GL_TEXTURE_2D);
-
-    return std::shared_ptr<TextureAsset>(new TextureAsset(textureId));
+    return std::shared_ptr<TextureAsset>(new TextureAsset(device, texture, sampler));
 }
 
 TextureAsset::~TextureAsset() {
-    // return texture resources
-    glDeleteTextures(1, &textureID_);
-    textureID_ = 0;
+    SDL_ReleaseGPUSampler(device_, sampler_);
+    SDL_ReleaseGPUTexture(device_, texture_);
 }

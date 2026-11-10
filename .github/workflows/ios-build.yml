@@ -1,0 +1,76 @@
+name: iOS build
+
+# Pull requests only compile. Pushes to master and ios-* branches also upload to TestFlight.
+on:
+  push:
+    branches: [master, 'ios-*']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate Xcode project
+        run: cmake -S ios -B build/ios -G Xcode -DSTARFLYER_BUILD_NUMBER=${{ github.run_number }}
+
+      - name: Compile for iOS devices (unsigned)
+        if: github.event_name == 'pull_request'
+        run: cmake --build build/ios --config Release -- -sdk iphoneos CODE_SIGNING_ALLOWED=NO
+
+      - name: Archive and upload to TestFlight
+        if: github.event_name != 'pull_request'
+        shell: bash
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          set -euo pipefail
+
+          KEY_PATH="$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8"
+
+          # Rebuild the PEM layout, which pasting into a secret can damage (e.g. CRLF line endings).
+          KEY_BODY=$(printf '%s' "$ASC_KEY_P8" | sed -e 's/\\n//g' -e 's/-----[A-Z ]*-----//g' | tr -d ' \t\r\n')
+          {
+            echo '-----BEGIN PRIVATE KEY-----'
+            printf '%s' "$KEY_BODY" | fold -w 64
+            echo
+            echo '-----END PRIVATE KEY-----'
+          } > "$KEY_PATH"
+          if ! openssl pkey -in "$KEY_PATH" -noout; then
+            echo "::error::ASC_KEY_P8 is not a valid private key (${#KEY_BODY} characters after cleanup; a .p8 key has about 190)."
+            exit 1
+          fi
+
+          ARCHIVE_PATH="$RUNNER_TEMP/StarFlyer.xcarchive"
+          LOG_PATH="$RUNNER_TEMP/xcodebuild.log"
+
+          # Surface failures as annotations, which are readable without opening the full log.
+          run_xcodebuild() {
+            if ! xcodebuild "$@" 2>&1 | tee "$LOG_PATH"; then
+              grep -E 'error:|\*\* .* FAILED \*\*' "$LOG_PATH" | sort -u | head -n 20 | sed 's/^/::error::/' || true
+              exit 1
+            fi
+          }
+
+          # Unsigned here; the export step signs with Apple's cloud-managed distribution
+          # certificate, so no certificate files or registered devices are needed.
+          run_xcodebuild archive \
+            -project build/ios/StarFlyer.xcodeproj \
+            -scheme StarFlyer \
+            -configuration Release \
+            -destination generic/platform=iOS \
+            -archivePath "$ARCHIVE_PATH" \
+            CODE_SIGNING_ALLOWED=NO
+
+          run_xcodebuild -exportArchive \
+            -archivePath "$ARCHIVE_PATH" \
+            -exportOptionsPlist ios/ExportOptions.plist \
+            -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"

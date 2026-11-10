@@ -1,6 +1,9 @@
 #ifndef ANDROIDGLINVESTIGATIONS_MODEL_H
 #define ANDROIDGLINVESTIGATIONS_MODEL_H
 
+#include <SDL3/SDL.h>
+#include <cstdint>
+#include <memory>
 #include <vector>
 #include "TextureAsset.h"
 
@@ -33,24 +36,27 @@ typedef uint16_t Index;
 
 class Model {
 public:
-    inline Model(
-            std::vector<Vertex> vertices,
-            std::vector<Index> indices,
-            std::shared_ptr<TextureAsset> spTexture)
-            : vertices_(std::move(vertices)),
-              indices_(std::move(indices)),
-              spTexture_(std::move(spTexture)) {}
+    /*! Uploads the mesh to GPU buffers. */
+    Model(SDL_GPUDevice *device,
+          const std::vector<Vertex> &vertices,
+          const std::vector<Index> &indices,
+          std::shared_ptr<TextureAsset> spTexture);
 
-    inline const Vertex *getVertexData() const {
-        return vertices_.data();
+    ~Model();
+
+    Model(const Model &) = delete;
+    Model &operator=(const Model &) = delete;
+
+    inline SDL_GPUBuffer *getVertexBuffer() const {
+        return vertexBuffer_;
     }
 
-    inline const size_t getIndexCount() const {
-        return indices_.size();
+    inline SDL_GPUBuffer *getIndexBuffer() const {
+        return indexBuffer_;
     }
 
-    inline const Index *getIndexData() const {
-        return indices_.data();
+    inline Uint32 getIndexCount() const {
+        return indexCount_;
     }
 
     inline const TextureAsset &getTexture() const {
@@ -58,8 +64,10 @@ public:
     }
 
 private:
-    std::vector<Vertex> vertices_;
-    std::vector<Index> indices_;
+    SDL_GPUDevice *device_;
+    SDL_GPUBuffer *vertexBuffer_;
+    SDL_GPUBuffer *indexBuffer_;
+    Uint32 indexCount_;
     std::shared_ptr<TextureAsset> spTexture_;
 };
 
