@@ -23,6 +23,10 @@ set(CMAKE_XCODE_ATTRIBUTE_SKIP_INSTALL YES)
 set(SDL_SHARED OFF CACHE BOOL "" FORCE)
 set(SDL_STATIC ON CACHE BOOL "" FORCE)
 set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
+# The game uses neither, and App Store processing rejects builds that reference the camera or
+# Bluetooth APIs without permission strings.
+set(SDL_CAMERA OFF CACHE BOOL "" FORCE)
+set(SDL_HIDAPI OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(
         SDL3
         URL https://github.com/libsdl-org/SDL/releases/download/release-3.4.20/SDL3-3.4.20.tar.gz
