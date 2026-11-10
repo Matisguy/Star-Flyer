@@ -1,7 +1,7 @@
 #ifndef ANDROIDGLINVESTIGATIONS_RENDERER_H
 #define ANDROIDGLINVESTIGATIONS_RENDERER_H
 
-#include <EGL/egl.h>
+#include <SDL3/SDL.h>
 #include <memory>
 #include <vector>
 
@@ -13,42 +13,31 @@
 #include "PlayerShip.h"
 #include "GameSettings.h"
 
-struct android_app;
-
 class Renderer {
 public:
-    /*!
-     * @param pApp the android_app this Renderer belongs to, needed to configure GL
-     */
-    inline Renderer(android_app *pApp) :
-            app_(pApp),
-            display_(EGL_NO_DISPLAY),
-            surface_(EGL_NO_SURFACE),
-            context_(EGL_NO_CONTEXT),
-            width_(0),
-            height_(0),
-            shaderNeedsNewProjectionMatrix_(true) {
-        initRenderer();
-    }
+    explicit Renderer(SDL_Window *window) : window_(window) {}
 
     virtual ~Renderer();
 
-    void handleInput();
+    /*!
+     * Creates the GPU device and scene.
+     * @return false if this device can't run the game's graphics; see SDL_GetError
+     */
+    bool init();
+
     void render();
 
 private:
-    void initRenderer();
-    void updateRenderArea();
+    bool ensureDepthTexture(Uint32 width, Uint32 height);
     void createModels();
 
-    android_app *app_;
-    EGLDisplay display_;
-    EGLSurface surface_;
-    EGLContext context_;
-    EGLint width_;
-    EGLint height_;
-
-    bool shaderNeedsNewProjectionMatrix_;
+    SDL_Window *window_;
+    SDL_GPUDevice *device_ = nullptr;
+    bool windowClaimed_ = false;
+    SDL_GPUTexture *depthTexture_ = nullptr;
+    SDL_GPUTextureFormat depthFormat_ = SDL_GPU_TEXTUREFORMAT_INVALID;
+    Uint32 width_ = 0;
+    Uint32 height_ = 0;
 
     std::unique_ptr<Shader> shader_;
 

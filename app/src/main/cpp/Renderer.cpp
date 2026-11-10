@@ -1,79 +1,58 @@
 #include "Renderer.h"
 
-#include <game-activity/native_app_glue/android_native_app_glue.h>
-#include <GLES3/gl3.h>
+#include <cmath>
 #include <memory>
 #include <vector>
 
-#include "AndroidOut.h"
 #include "Shader.h"
 #include "Utility.h"
 #include "TextureAsset.h"
 #include "TeapotModel.h"
 
-#define PRINT_GL_STRING(s) {aout << #s": "<< glGetString(s) << std::endl;}
-
-#define PRINT_GL_STRING_AS_LIST(s) { \
-std::istringstream extensionStream((const char *) glGetString(s));\
-std::vector<std::string> extensionList(\
-        std::istream_iterator<std::string>{extensionStream},\
-        std::istream_iterator<std::string>());\
-aout << #s":\n";\
-for (auto& extension: extensionList) {\
-    aout << extension << "\n";\
-}\
-aout << std::endl;\
-}
-
-// Vertex shader
-static const char *vertex = R"vertex(#version 300 es
-in vec3 inPosition;
-in vec2 inUV;
-
-out vec2 fragUV;
-
-uniform mat4 uProjection;
-
-void main() {
-    fragUV = inUV;
-    gl_Position = uProjection * vec4(inPosition, 1.0);
-}
-)vertex";
-
-// Fragment shader
-static const char *fragment = R"fragment(#version 300 es
-precision mediump float;
-
-in vec2 fragUV;
-
-uniform sampler2D uTexture;
-uniform vec4 uColor;
-
-out vec4 outColor;
-
-void main() {
-    outColor = texture(uTexture, fragUV) * uColor;
-}
-)fragment";
-
 Renderer::~Renderer() {
-    if (display_ != EGL_NO_DISPLAY) {
-        eglMakeCurrent(display_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-        if (context_ != EGL_NO_CONTEXT) {
-            eglDestroyContext(display_, context_);
-            context_ = EGL_NO_CONTEXT;
-        }
-        if (surface_ != EGL_NO_SURFACE) {
-            eglDestroySurface(display_, surface_);
-            surface_ = EGL_NO_SURFACE;
-        }
-        eglTerminate(display_);
-        display_ = EGL_NO_DISPLAY;
+    if (!device_) {
+        return;
     }
+
+    SDL_WaitForGPUIdle(device_);
+
+    skyboxModel_.reset();
+    teapotModel_.reset();
+    crosshairModel_.reset();
+    shader_.reset();
+
+    if (depthTexture_) {
+        SDL_ReleaseGPUTexture(device_, depthTexture_);
+    }
+    if (windowClaimed_) {
+        SDL_ReleaseWindowFromGPUDevice(device_, window_);
+    }
+    SDL_DestroyGPUDevice(device_);
 }
 
 void Renderer::render() {
-    updateRenderArea();
+    SDL_GPUCommandBuffer *commandBuffer = SDL_AcquireGPUCommandBuffer(device_);
+    if (!commandBuffer) {
+        SDL_LogError(SDL_LOG_CATEGORY_RENDER, "Command buffer failed: %s", SDL_GetError());
+        return;
+    }
+
+    SDL_GPUTexture *swapchainTexture = nullptr;
+    Uint32 swapchainWidth = 0;
+    Uint32 swapchainHeight = 0;
+    if (!SDL_WaitAndAcquireGPUSwapchainTexture(
+            commandBuffer, window_, &swapchainTexture, &swapchainWidth, &swapchainHeight)) {
+        SDL_LogError(SDL_LOG_CATEGORY_RENDER, "Swapchain failed: %s", SDL_GetError());
+        SDL_CancelGPUCommandBuffer(commandBuffer);
+        return;
+    }
+
+    // No drawable surface right now, e.g. while Android recreates it after backgrounding.
+    if (!swapchainTexture || !ensureDepthTexture(swapchainWidth, swapchainHeight)) {
+        SDL_SubmitGPUCommandBuffer(commandBuffer);
+        return;
+    }
+
 
     // 1. Calculate timestep (delta time in seconds)
     float dt = timeStep_.tick();
@@ -148,7 +127,24 @@ void Renderer::render() {
     }
 
     // Clear color and depth buffers
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    SDL_GPUColorTargetInfo colorTarget = {};
+    colorTarget.texture = swapchainTexture;
+    colorTarget.clear_color = {0.02f, 0.02f, 0.08f, 1.0f}; // Deep space background
+    colorTarget.load_op = SDL_GPU_LOADOP_CLEAR;
+    colorTarget.store_op = SDL_GPU_STOREOP_STORE;
+
+    SDL_GPUDepthStencilTargetInfo depthTarget = {};
+    depthTarget.texture = depthTexture_;
+    depthTarget.clear_depth = 1.0f;
+    depthTarget.load_op = SDL_GPU_LOADOP_CLEAR;
+    depthTarget.store_op = SDL_GPU_STOREOP_DONT_CARE;
+    depthTarget.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+    depthTarget.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+    depthTarget.cycle = true;
+
+    SDL_GPURenderPass *renderPass =
+            SDL_BeginGPURenderPass(commandBuffer, &colorTarget, 1, &depthTarget);
+    shader_->activate(commandBuffer, renderPass);
 
     // A. Render Skybox (rotation around camera only)
     if (skyboxModel_) {
@@ -199,95 +195,81 @@ void Renderer::render() {
         shader_->drawModel(*teapotModel_);
     }
 
-    auto swapResult = eglSwapBuffers(display_, surface_);
-    assert(swapResult == EGL_TRUE);
+    shader_->deactivate();
+    SDL_EndGPURenderPass(renderPass);
+    SDL_SubmitGPUCommandBuffer(commandBuffer);
 }
 
-void Renderer::initRenderer() {
-    constexpr EGLint attribs[] = {
-            EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
-            EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
-            EGL_BLUE_SIZE, 8,
-            EGL_GREEN_SIZE, 8,
-            EGL_RED_SIZE, 8,
-            EGL_DEPTH_SIZE, 24,
-            EGL_NONE
-    };
+bool Renderer::init() {
+    SDL_PropertiesID props = SDL_CreateProperties();
+    SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_SPIRV_BOOLEAN,
+                           Shader::shaderFormat() == SDL_GPU_SHADERFORMAT_SPIRV);
+    SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_MSL_BOOLEAN,
+                           Shader::shaderFormat() == SDL_GPU_SHADERFORMAT_MSL);
+#ifndef NDEBUG
+    SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_DEBUGMODE_BOOLEAN, true);
+#endif
+    // The game uses none of these, and requiring them would exclude some Android GPUs.
+    SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_FEATURE_CLIP_DISTANCE_BOOLEAN, false);
+    SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_FEATURE_DEPTH_CLAMPING_BOOLEAN, false);
+    SDL_SetBooleanProperty(
+            props, SDL_PROP_GPU_DEVICE_CREATE_FEATURE_INDIRECT_DRAW_FIRST_INSTANCE_BOOLEAN, false);
+    SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_FEATURE_ANISOTROPY_BOOLEAN, false);
 
-    auto display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
-    eglInitialize(display, nullptr, nullptr);
+    device_ = SDL_CreateGPUDeviceWithProperties(props);
+    SDL_DestroyProperties(props);
+    if (!device_) {
+        return false;
+    }
 
-    EGLint numConfigs;
-    eglChooseConfig(display, attribs, nullptr, 0, &numConfigs);
+    if (!SDL_ClaimWindowForGPUDevice(device_, window_)) {
+        return false;
+    }
+    windowClaimed_ = true;
 
-    std::unique_ptr<EGLConfig[]> supportedConfigs(new EGLConfig[numConfigs]);
-    eglChooseConfig(display, attribs, supportedConfigs.get(), numConfigs, &numConfigs);
+    SDL_Log("GPU driver: %s", SDL_GetGPUDeviceDriver(device_));
 
-    auto config = *std::find_if(
-            supportedConfigs.get(),
-            supportedConfigs.get() + numConfigs,
-            [&display](const EGLConfig &config) {
-                EGLint red, green, blue, depth;
-                if (eglGetConfigAttrib(display, config, EGL_RED_SIZE, &red)
-                    && eglGetConfigAttrib(display, config, EGL_GREEN_SIZE, &green)
-                    && eglGetConfigAttrib(display, config, EGL_BLUE_SIZE, &blue)
-                    && eglGetConfigAttrib(display, config, EGL_DEPTH_SIZE, &depth)) {
-                    return red == 8 && green == 8 && blue == 8 && depth == 24;
-                }
-                return false;
-            });
+    depthFormat_ = SDL_GPUTextureSupportsFormat(
+            device_,
+            SDL_GPU_TEXTUREFORMAT_D32_FLOAT,
+            SDL_GPU_TEXTURETYPE_2D,
+            SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET)
+                   ? SDL_GPU_TEXTUREFORMAT_D32_FLOAT
+                   : SDL_GPU_TEXTUREFORMAT_D24_UNORM;
 
-    EGLint format;
-    eglGetConfigAttrib(display, config, EGL_NATIVE_VISUAL_ID, &format);
-    EGLSurface surface = eglCreateWindowSurface(display, config, app_->window, nullptr);
-
-    EGLint contextAttribs[] = {EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE};
-    EGLContext context = eglCreateContext(display, config, nullptr, contextAttribs);
-
-    auto madeCurrent = eglMakeCurrent(display, surface, surface, context);
-    assert(madeCurrent);
-
-    display_ = display;
-    surface_ = surface;
-    context_ = context;
-
-    width_ = -1;
-    height_ = -1;
-
-    PRINT_GL_STRING(GL_VENDOR);
-    PRINT_GL_STRING(GL_RENDERER);
-    PRINT_GL_STRING(GL_VERSION);
-    PRINT_GL_STRING_AS_LIST(GL_EXTENSIONS);
-
-    shader_ = std::unique_ptr<Shader>(
-            Shader::loadShader(vertex, fragment, "inPosition", "inUV", "uProjection", "uColor"));
-    assert(shader_);
-
-    shader_->activate();
-
-    // Configure OpenGL 3D state
-    glClearColor(0.02f, 0.02f, 0.08f, 1.0f); // Deep space background
-    glEnable(GL_DEPTH_TEST);
-    glDepthFunc(GL_LEQUAL);
+    shader_ = Shader::create(
+            device_, SDL_GetGPUSwapchainTextureFormat(device_, window_), depthFormat_);
+    if (!shader_) {
+        return false;
+    }
 
     // Create scene models & physics objects
     createModels();
+    return true;
 }
 
-void Renderer::updateRenderArea() {
-    EGLint width;
-    eglQuerySurface(display_, surface_, EGL_WIDTH, &width);
-
-    EGLint height;
-    eglQuerySurface(display_, surface_, EGL_HEIGHT, &height);
-
-    if (width != width_ || height != height_) {
-        width_ = width;
-        height_ = height;
-        glViewport(0, 0, width, height);
-
-        shaderNeedsNewProjectionMatrix_ = true;
+bool Renderer::ensureDepthTexture(Uint32 width, Uint32 height) {
+    if (depthTexture_ && width == width_ && height == height_) {
+        return true;
     }
+
+    if (depthTexture_) {
+        SDL_ReleaseGPUTexture(device_, depthTexture_);
+    }
+
+    SDL_GPUTextureCreateInfo info = {};
+    info.type = SDL_GPU_TEXTURETYPE_2D;
+    info.format = depthFormat_;
+    info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+    info.width = width;
+    info.height = height;
+    info.layer_count_or_depth = 1;
+    info.num_levels = 1;
+    depthTexture_ = SDL_CreateGPUTexture(device_, &info);
+
+    width_ = width;
+    height_ = height;
+    return depthTexture_ != nullptr;
 }
 
 void Renderer::createModels() {
@@ -347,12 +329,12 @@ void Renderer::createModels() {
         skyboxIndices.push_back(offset + 3);
     }
 
-    auto checkerboardTexture = TextureAsset::createCheckerboardTexture(256, 256, 32);
-    skyboxModel_ = std::make_unique<Model>(skyboxVertices, skyboxIndices, checkerboardTexture);
+    auto checkerboardTexture = TextureAsset::createCheckerboardTexture(device_, 256, 256, 32);
+    skyboxModel_ = std::make_unique<Model>(device_, skyboxVertices, skyboxIndices, checkerboardTexture);
 
     // 3. Utah Teapot Mesh
     auto [teapotVertices, teapotIndices] = TeapotModel::generateMesh(1.0f);
-    teapotModel_ = std::make_unique<Model>(teapotVertices, teapotIndices, checkerboardTexture);
+    teapotModel_ = std::make_unique<Model>(device_, teapotVertices, teapotIndices, checkerboardTexture);
 
     // 4. Spawn 25 floating teapots scattered in space
     floatingTeapots_.clear();
@@ -381,14 +363,4 @@ void Renderer::createModels() {
         teapot->angularVelocity = Vec3((i % 3 - 1) * 0.2f, (i % 2 - 0.5f) * 0.4f, (i % 4 - 2) * 0.15f);
         floatingTeapots_.push_back(std::move(teapot));
     }
-}
-
-void Renderer::handleInput() {
-    auto *inputBuffer = android_app_swap_input_buffers(app_);
-    if (!inputBuffer) {
-        return;
-    }
-
-    android_app_clear_motion_events(inputBuffer);
-    android_app_clear_key_events(inputBuffer);
 }

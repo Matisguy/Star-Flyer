@@ -5,37 +5,42 @@ cmake_minimum_required(VERSION 3.22.1)
 
 project("starflyer")
 
-# Creates your game shared library. The name must be the same as the
-# one used for loading in your Kotlin/Java or AndroidManifest.txt files.
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+include(GameSources.cmake)
+
+# Compile the Vulkan shaders with the NDK's own compiler. The output is a comma-separated list of
+# SPIR-V words that Shader.cpp includes into an array.
+file(GLOB STARFLYER_GLSLC_CANDIDATES "${ANDROID_NDK}/shader-tools/*/glslc*")
+if (NOT STARFLYER_GLSLC_CANDIDATES)
+    message(FATAL_ERROR "glslc not found under ${ANDROID_NDK}/shader-tools")
+endif ()
+list(GET STARFLYER_GLSLC_CANDIDATES 0 STARFLYER_GLSLC)
+
+set(STARFLYER_SHADER_DIR ${CMAKE_CURRENT_BINARY_DIR}/shaders)
+file(MAKE_DIRECTORY ${STARFLYER_SHADER_DIR})
+set(STARFLYER_SHADER_OUTPUTS)
+foreach (shader scene.vert scene.frag)
+    set(output ${STARFLYER_SHADER_DIR}/${shader}.spv.inc)
+    add_custom_command(
+            OUTPUT ${output}
+            COMMAND ${STARFLYER_GLSLC} -mfmt=num --target-env=vulkan1.0
+                    -o ${output} ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${shader}
+            DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/${shader}
+            VERBATIM)
+    list(APPEND STARFLYER_SHADER_OUTPUTS ${output})
+endforeach ()
+
+# Creates your game shared library. The name must match getLibraries() in MainActivity.java.
 add_library(starflyer SHARED
-        main.cpp
-        AndroidOut.cpp
-        GameSettings.cpp
-        OrientationTracker.cpp
-        PlayerShip.cpp
-        Renderer.cpp
-        RigidBody.cpp
-        Shader.cpp
-        TeapotModel.cpp
-        TextureAsset.cpp
-        Utility.cpp)
+        ${STARFLYER_GAME_SOURCES}
+        AndroidBridge.cpp
+        ${STARFLYER_SHADER_OUTPUTS})
 
-# Searches for a package provided by the game activity dependency
-find_package(game-activity REQUIRED CONFIG)
+target_include_directories(starflyer PRIVATE ${STARFLYER_SHADER_DIR})
 
-# Forces the linker to keep the JNI entry point for GameActivity
-set(CMAKE_SHARED_LINKER_FLAGS
-        "${CMAKE_SHARED_LINKER_FLAGS} -u Java_com_google_androidgamesdk_GameActivity_initializeNativeCode")
+# Provided by the SDL3 Android archive through prefab
+find_package(SDL3 REQUIRED CONFIG)
 
-# Configure libraries CMake uses to link your target library.
-target_link_libraries(starflyer
-        # The game activity
-        game-activity::game-activity_static
-
-        # EGL and other dependent libraries required for drawing
-        # and interacting with Android system
-        EGL
-        GLESv3
-        jnigraphics
-        android
-        log)
+target_link_libraries(starflyer SDL3::SDL3-shared)

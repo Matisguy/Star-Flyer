@@ -25,17 +25,13 @@ import android.widget.RelativeLayout;
 import android.widget.SeekBar;
 import android.widget.TextView;
 
-import com.google.androidgamesdk.GameActivity;
+import org.libsdl.app.SDLActivity;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Locale;
 
-public class MainActivity extends GameActivity implements SensorEventListener {
-    static {
-        System.loadLibrary("starflyer");
-    }
-
+public class MainActivity extends SDLActivity implements SensorEventListener {
     public static final int STATE_MAIN_MENU = 0;
     public static final int STATE_LEVEL_SELECT = 1;
     public static final int STATE_PLAYING = 2;
@@ -79,8 +75,16 @@ public class MainActivity extends GameActivity implements SensorEventListener {
     public native void nativeSetSensitivity(float turnSens);
 
     @Override
+    protected String[] getLibraries() {
+        return new String[] {"SDL3", "starflyer"};
+    }
+
+    @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        if (mBrokenLibraries) {
+            return; // SDLActivity has already shown the error; native methods are unavailable.
+        }
 
         // Enforce Sensor Landscape orientation for flight simulator
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
@@ -110,7 +114,7 @@ public class MainActivity extends GameActivity implements SensorEventListener {
         createPauseScreen();
         createInGameHudScreen();
 
-        // Add root container on top of GameActivity native surface
+        // Add root container on top of SDL's native surface
         addContentView(rootOverlay, new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT

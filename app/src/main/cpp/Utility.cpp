@@ -1,30 +1,6 @@
 #include "Utility.h"
-#include "AndroidOut.h"
 
-#include <GLES3/gl3.h>
-
-#define CHECK_ERROR(e) case e: aout << "GL Error: "#e << std::endl; break;
-
-bool Utility::checkAndLogGlError(bool alwaysLog) {
-    GLenum error = glGetError();
-    if (error == GL_NO_ERROR) {
-        if (alwaysLog) {
-            aout << "No GL error" << std::endl;
-        }
-        return true;
-    } else {
-        switch (error) {
-            CHECK_ERROR(GL_INVALID_ENUM);
-            CHECK_ERROR(GL_INVALID_VALUE);
-            CHECK_ERROR(GL_INVALID_OPERATION);
-            CHECK_ERROR(GL_INVALID_FRAMEBUFFER_OPERATION);
-            CHECK_ERROR(GL_OUT_OF_MEMORY);
-            default:
-                aout << "Unknown GL error: " << error << std::endl;
-        }
-        return false;
-    }
-}
+#include <cmath>
 
 float *
 Utility::buildOrthographicMatrix(float *outMatrix, float halfHeight, float aspect, float near,
@@ -76,13 +52,14 @@ float *Utility::buildPerspectiveMatrix(float *outMatrix, float fovDegrees, float
     // column 3
     outMatrix[8] = 0.0f;
     outMatrix[9] = 0.0f;
-    outMatrix[10] = (zFar + zNear) / (zNear - zFar);
+    // Vulkan and Metal clip depth to [0, 1], unlike OpenGL's [-1, 1].
+    outMatrix[10] = zFar / (zNear - zFar);
     outMatrix[11] = -1.0f;
 
     // column 4
     outMatrix[12] = 0.0f;
     outMatrix[13] = 0.0f;
-    outMatrix[14] = (2.0f * zFar * zNear) / (zNear - zFar);
+    outMatrix[14] = (zFar * zNear) / (zNear - zFar);
     outMatrix[15] = 0.0f;
 
     return outMatrix;

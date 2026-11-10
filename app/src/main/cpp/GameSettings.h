@@ -21,4 +21,7 @@ struct GameSettings {
 
 extern GameSettings gGameSettings;
 
+/** Sets the game state and keeps isPaused in step with it. Used by each platform's menus. */
+void applyGameState(GameState state);
+
 #endif // STARFLYER_GAME_SETTINGS_H
