@@ -117,6 +117,8 @@ public:
     // Resolve collision between two rigid bodies with linear & angular momentum exchange
     static void resolveCollision(RigidBody &a, RigidBody &b);
 
+    int type; // what is this object actually supposed to be?
+
     Vec3 position;
     Vec3 velocity;
     Vec3 force;
@@ -132,6 +134,11 @@ public:
     float scale = 1.0f;
 
     Vec3 color;            // RGB color tint
+
+    // Tap Input Interaction Flags
+    bool pointedAt = false;
+    bool shotAt = false;
+    bool chargedShot = false;
 };
 
 #endif // STARFLYER_RIGID_BODY_H

@@ -15,6 +15,7 @@ struct GameSettings {
     float sfxVolume = 1.0f;
     float turnSensitivity = 3.0f;
     float rollSensitivity = 1.0f;
+    float chargeTime = 0.5f; // Threshold for charged shot in seconds
     bool isPaused = false;
     bool calibrationRequested = false;
 };

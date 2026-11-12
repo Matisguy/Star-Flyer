@@ -30,6 +30,10 @@ Renderer::~Renderer() {
     SDL_DestroyGPUDevice(device_);
 }
 
+void Renderer::handleEvent(const SDL_Event &event) {
+    tapInputHandler_.handleEvent(event, width_, height_);
+}
+
 void Renderer::render() {
     SDL_GPUCommandBuffer *commandBuffer = SDL_AcquireGPUCommandBuffer(device_);
     if (!commandBuffer) {
@@ -57,7 +61,15 @@ void Renderer::render() {
     // 1. Calculate timestep (delta time in seconds)
     float dt = timeStep_.tick();
 
-    // 2. Update orientation tracker
+    // 2. Dynamically update Skybox Texture based on GameState / Active Level
+    // - On Startup & Menus: level1_2skybox.png
+    // - On Mission 0 (Debug Level): tutorialskybox.png
+    std::string targetSkybox = ((gGameSettings.gameState == GameState::PLAYING) || (gGameSettings.gameState == GameState::PAUSED))
+            ? "tutorialskybox.png"
+            : "level1_2skybox.png";
+    updateSkybox(targetSkybox);
+
+    // 3. Update orientation tracker
     orientationTracker_.update(dt);
 
     // 3. Build 3D Perspective Projection Matrix
@@ -80,21 +92,21 @@ void Renderer::render() {
         playerShip_->update(dt, cameraVector, viewMatrix);
 
         // Update floating teapots & resolve collisions
-        for (size_t i = 0; i < floatingTeapots_.size(); ++i) {
-            floatingTeapots_[i]->update(dt);
+        for (size_t i = 0; i < gameObjects_.size(); ++i) {
+            gameObjects_[i]->update(dt);
 
             // Collisions between player ship and teapots
-            RigidBody::resolveCollision(playerShip_->getRigidBody(), *floatingTeapots_[i]);
+            RigidBody::resolveCollision(playerShip_->getRigidBody(), *gameObjects_[i]);
 
             // Collisions between teapots
-            for (size_t j = i + 1; j < floatingTeapots_.size(); ++j) {
-                RigidBody::resolveCollision(*floatingTeapots_[i], *floatingTeapots_[j]);
+            for (size_t j = i + 1; j < gameObjects_.size(); ++j) {
+                RigidBody::resolveCollision(*gameObjects_[i], *gameObjects_[j]);
             }
         }
     } else if (!isPlaying && !isPaused) {
         // Slow ambient rotation of floating teapots when in menus
-        for (size_t i = 0; i < floatingTeapots_.size(); ++i) {
-            floatingTeapots_[i]->update(dt * 0.3f);
+        for (size_t i = 0; i < gameObjects_.size(); ++i) {
+            gameObjects_[i]->update(dt * 0.3f);
         }
     }
 
@@ -125,6 +137,9 @@ void Renderer::render() {
             finalViewMatrix[i] = viewMatrix[i];
         }
     }
+
+    // 8. Update Tap Input Handler (raycasting, target pointing, shotAt destruction, hitmarkers)
+    tapInputHandler_.update(dt, static_cast<int>(width_), static_cast<int>(height_), finalViewMatrix, projectionMatrix, gameObjects_);
 
     // Clear color and depth buffers
     SDL_GPUColorTargetInfo colorTarget = {};
@@ -157,14 +172,18 @@ void Renderer::render() {
 
     // B. Render Floating Teapots in World Space
     if (teapotModel_ && playerShip_) {
-        for (const auto &teapot : floatingTeapots_) {
+        for (const auto &teapot : gameObjects_) {
             float modelMatrix[16], viewMvp[16], finalMvp[16];
             teapot->getModelMatrix(modelMatrix);
             Utility::multiplyMatrix4x4(finalViewMatrix, modelMatrix, viewMvp);
             Utility::multiplyMatrix4x4(projectionMatrix, viewMvp, finalMvp);
 
             shader_->setProjectionMatrix(finalMvp);
-            shader_->setColor(teapot->color.x, teapot->color.y, teapot->color.z, 1.0f);
+            if (teapot->pointedAt) {
+                shader_->setColor(0.1f, 1.0f, 0.4f, 1.0f); // Bright Neon Green Target Highlight
+            } else {
+                shader_->setColor(teapot->color.x, teapot->color.y, teapot->color.z, 1.0f);
+            }
             shader_->drawModel(*teapotModel_);
         }
     }
@@ -195,9 +214,102 @@ void Renderer::render() {
         shader_->drawModel(*teapotModel_);
     }
 
+    // D. Render Tap Intersecting Crosshair Lines (Vertical & Horizontal)
+    if (tapInputHandler_.isTapActive()) {
+        float tapX = 0.0f, tapY = 0.0f;
+        tapInputHandler_.getTapPosition(tapX, tapY);
+
+        // Vertical Line (top to bottom across screen)
+        drawHudLine(tapX, 0.0f, tapX, static_cast<float>(height_), 3.0f, 0.1f, 1.0f, 0.4f, 1.0f);
+
+        // Horizontal Line (left to right across screen)
+        drawHudLine(0.0f, tapY, static_cast<float>(width_), tapY, 3.0f, 0.1f, 1.0f, 0.4f, 1.0f);
+    }
+
+    // E. Render Hitmarker Effect (0.05 seconds duration on tap release)
+    const auto &hitmarker = tapInputHandler_.getHitmarker();
+    if (hitmarker.timeRemaining > 0.0f) {
+        if (!hitmarkerTexture_) {
+            hitmarkerTexture_ = TextureAsset::loadAsset(device_, "hitmarkerdefault.png");
+        }
+        drawHudQuad(hitmarker.x, hitmarker.y, 48.0f, 48.0f, hitmarkerTexture_, 1.0f, 0.2f, 0.2f, 1.0f);
+    }
+
     shader_->deactivate();
     SDL_EndGPURenderPass(renderPass);
     SDL_SubmitGPUCommandBuffer(commandBuffer);
+}
+
+void Renderer::drawHudLine(float x1, float y1, float x2, float y2, float thickness, float r, float g, float b, float a) {
+    if (!device_ || width_ == 0 || height_ == 0) return;
+
+    float ortho2D[16];
+    Utility::buildOrthographicMatrix(ortho2D, static_cast<float>(height_) * 0.5f, static_cast<float>(width_) / static_cast<float>(height_), 0.0f, 10.0f);
+
+    float dx = x2 - x1;
+    float dy = y2 - y1;
+    float len = std::sqrt(dx * dx + dy * dy);
+    if (len < 0.0001f) return;
+
+    float nx = -dy / len * (thickness * 0.5f);
+    float ny = dx / len * (thickness * 0.5f);
+
+    float halfW = static_cast<float>(width_) * 0.5f;
+    float halfH = static_cast<float>(height_) * 0.5f;
+
+    auto mapX = [halfW](float x) { return x - halfW; };
+    auto mapY = [halfH](float y) { return halfH - y; };
+
+    std::vector<Vertex> lineVertices = {
+        Vertex(Vector3{mapX(x1 + nx), mapY(y1 + ny), 0.0f}, Vector2{0.0f, 0.0f}),
+        Vertex(Vector3{mapX(x1 - nx), mapY(y1 - ny), 0.0f}, Vector2{1.0f, 0.0f}),
+        Vertex(Vector3{mapX(x2 - nx), mapY(y2 - ny), 0.0f}, Vector2{1.0f, 1.0f}),
+        Vertex(Vector3{mapX(x2 + nx), mapY(y2 + ny), 0.0f}, Vector2{0.0f, 1.0f}),
+    };
+    std::vector<Index> lineIndices = {0, 1, 2, 0, 2, 3};
+
+    auto checkerboard = TextureAsset::createCheckerboardTexture(device_, 64, 64, 32);
+    Model tempLineModel(device_, lineVertices, lineIndices, checkerboard);
+
+    shader_->setProjectionMatrix(ortho2D);
+    shader_->setColor(r, g, b, a);
+    shader_->drawModel(tempLineModel);
+}
+
+void Renderer::drawHudQuad(float centerX, float centerY, float w, float h, std::shared_ptr<TextureAsset> texture, float r, float g, float b, float a) {
+    if (!device_ || width_ == 0 || height_ == 0) return;
+
+    float ortho2D[16];
+    Utility::buildOrthographicMatrix(ortho2D, static_cast<float>(height_) * 0.5f, static_cast<float>(width_) / static_cast<float>(height_), 0.0f, 10.0f);
+
+    float halfW = static_cast<float>(width_) * 0.5f;
+    float halfH = static_cast<float>(height_) * 0.5f;
+
+    auto mapX = [halfW](float x) { return x - halfW; };
+    auto mapY = [halfH](float y) { return halfH - y; };
+
+    float x0 = mapX(centerX - w * 0.5f);
+    float x1 = mapX(centerX + w * 0.5f);
+    float y0 = mapY(centerY - h * 0.5f);
+    float y1 = mapY(centerY + h * 0.5f);
+
+    std::vector<Vertex> quadVertices = {
+        Vertex(Vector3{x0, y0, 0.0f}, Vector2{0.0f, 0.0f}),
+        Vertex(Vector3{x1, y0, 0.0f}, Vector2{1.0f, 0.0f}),
+        Vertex(Vector3{x1, y1, 0.0f}, Vector2{1.0f, 1.0f}),
+        Vertex(Vector3{x0, y1, 0.0f}, Vector2{0.0f, 1.0f}),
+    };
+    std::vector<Index> quadIndices = {0, 1, 2, 0, 2, 3};
+
+    if (!texture) {
+        texture = TextureAsset::createCheckerboardTexture(device_, 64, 64, 32);
+    }
+
+    Model tempQuadModel(device_, quadVertices, quadIndices, texture);
+
+    shader_->setProjectionMatrix(ortho2D);
+    shader_->setColor(r, g, b, a);
+    shader_->drawModel(tempQuadModel);
 }
 
 bool Renderer::init() {
@@ -272,72 +384,99 @@ bool Renderer::ensureDepthTexture(Uint32 width, Uint32 height) {
     return depthTexture_ != nullptr;
 }
 
+namespace {
+
+std::pair<std::vector<Vertex>, std::vector<Index>> createSkyboxNetMesh(float s) {
+    float u0 = 0.0f, u1 = 0.25f, u2 = 0.5f, u3 = 0.75f, u4 = 1.0f;
+    float v0 = 0.0f, v1 = 1.0f / 3.0f, v2 = 2.0f / 3.0f, v3 = 1.0f;
+
+    std::vector<Vertex> vertices = {
+        // 1. Front Face (-Z) - Column 1, Middle Row (u1..u2, v1..v2)
+        Vertex(Vector3{s,  s,  -s}, Vector2{u1, v2}),
+        Vertex(Vector3{-s, s,  -s}, Vector2{u2, v2}),
+        Vertex(Vector3{-s,-s,  -s}, Vector2{u2, v1}),
+        Vertex(Vector3{s, -s,  -s}, Vector2{u1, v1}),
+
+        // 2. Back Face (+Z) - Column 3, Middle Row (u3..u4, v1..v2)
+        Vertex(Vector3{-s, s, s}, Vector2{u3, v2}),
+        Vertex(Vector3{s,  s, s}, Vector2{u4, v2}),
+        Vertex(Vector3{s, -s, s}, Vector2{u4, v1}),
+        Vertex(Vector3{-s,-s, s}, Vector2{u3, v1}),
+
+        // 3. Left Face (+X) - Column 0, Middle Row (u0..u1, v1..v2)
+        Vertex(Vector3{s, s, s}, Vector2{u0, v2}),
+        Vertex(Vector3{s, s,-s}, Vector2{u1, v2}),
+        Vertex(Vector3{s,-s,-s}, Vector2{u1, v1}),
+        Vertex(Vector3{s,-s, s}, Vector2{0, v1}),
+
+        // 4. Right Face (-X) - Column 2, Middle Row (u2..u3, v1..v2)
+        Vertex(Vector3{ -s, s,-s}, Vector2{u2, v2}),
+        Vertex(Vector3{ -s, s, s}, Vector2{u3, v2}),
+        Vertex(Vector3{ -s,-s, s}, Vector2{u3, v1}),
+        Vertex(Vector3{ -s,-s,-s}, Vector2{u2, v1}),
+
+        // 5. Top / Upper Face (-Y) - Column 1, Top Row (u1..u2, v0..v1)
+        Vertex(Vector3{s,  -s,-s}, Vector2{u1, v1}),
+        Vertex(Vector3{-s, -s,-s}, Vector2{u2, v1}),
+        Vertex(Vector3{-s, -s, s}, Vector2{u2, v0}),
+        Vertex(Vector3{s,  -s, s}, Vector2{u1, v0}),
+
+        // 6. Bottom / Lower Face (+Y) - Column 1, Bottom Row (u1..u2, v2..v3)
+        Vertex(Vector3{s, s, s}, Vector2{u1, v3}),
+        Vertex(Vector3{-s,s, s}, Vector2{u2, v3}),
+        Vertex(Vector3{-s,s,-s}, Vector2{u2, v2}),
+        Vertex(Vector3{s, s,-s}, Vector2{u1, v2}),
+    };
+
+    std::vector<Index> indices;
+    for (int i = 0; i < 6; ++i) {
+        Index offset = static_cast<Index>(i * 4);
+        indices.push_back(offset + 0);
+        indices.push_back(offset + 1);
+        indices.push_back(offset + 2);
+
+        indices.push_back(offset + 0);
+        indices.push_back(offset + 2);
+        indices.push_back(offset + 3);
+    }
+
+    return {vertices, indices};
+}
+
+} // namespace
+
+void Renderer::updateSkybox(const std::string &textureName) {
+    if (currentSkyboxName_ == textureName && skyboxModel_) {
+        return;
+    }
+
+    currentSkyboxName_ = textureName;
+    auto [skyboxVertices, skyboxIndices] = createSkyboxNetMesh(100.0f);
+
+    // Load custom asset texture (e.g. level1_2skybox.png or tutorialskybox.png)
+    auto texture = TextureAsset::loadAsset(device_, textureName);
+    if (!texture) {
+        // Fallback to checkerboard texture if file is not found in asset directory
+        texture = TextureAsset::createCheckerboardTexture(device_, 256, 256, 32);
+    }
+
+    skyboxModel_ = std::make_unique<Model>(device_, skyboxVertices, skyboxIndices, texture);
+}
+
 void Renderer::createModels() {
     // 1. Player Ship Physics Object
     playerShip_ = std::make_unique<PlayerShip>();
 
-    // 2. Skybox Cube Model
-    float s = 100.0f;
-    float t = 8.0f;
-    std::vector<Vertex> skyboxVertices = {
-        // Front Face (+Z)
-        Vertex(Vector3{-s, -s,  s}, Vector2{0, 0}),
-        Vertex(Vector3{ s, -s,  s}, Vector2{t, 0}),
-        Vertex(Vector3{ s,  s,  s}, Vector2{t, t}),
-        Vertex(Vector3{-s,  s,  s}, Vector2{0, t}),
-
-        // Back Face (-Z)
-        Vertex(Vector3{ s, -s, -s}, Vector2{0, 0}),
-        Vertex(Vector3{-s, -s, -s}, Vector2{t, 0}),
-        Vertex(Vector3{-s,  s, -s}, Vector2{t, t}),
-        Vertex(Vector3{ s,  s, -s}, Vector2{0, t}),
-
-        // Left Face (-X)
-        Vertex(Vector3{-s, -s, -s}, Vector2{0, 0}),
-        Vertex(Vector3{-s, -s,  s}, Vector2{t, 0}),
-        Vertex(Vector3{-s,  s,  s}, Vector2{t, t}),
-        Vertex(Vector3{-s,  s, -s}, Vector2{0, t}),
-
-        // Right Face (+X)
-        Vertex(Vector3{ s, -s,  s}, Vector2{0, 0}),
-        Vertex(Vector3{ s, -s, -s}, Vector2{t, 0}),
-        Vertex(Vector3{ s,  s, -s}, Vector2{t, t}),
-        Vertex(Vector3{ s,  s,  s}, Vector2{0, t}),
-
-        // Top Face (+Y)
-        Vertex(Vector3{-s,  s,  s}, Vector2{0, 0}),
-        Vertex(Vector3{ s,  s,  s}, Vector2{t, 0}),
-        Vertex(Vector3{ s,  s, -s}, Vector2{t, t}),
-        Vertex(Vector3{-s,  s, -s}, Vector2{0, t}),
-
-        // Bottom Face (-Y)
-        Vertex(Vector3{-s, -s, -s}, Vector2{0, 0}),
-        Vertex(Vector3{ s, -s, -s}, Vector2{t, 0}),
-        Vertex(Vector3{ s, -s,  s}, Vector2{t, t}),
-        Vertex(Vector3{-s, -s,  s}, Vector2{0, t}),
-    };
-
-    std::vector<Index> skyboxIndices;
-    for (int i = 0; i < 6; ++i) {
-        Index offset = static_cast<Index>(i * 4);
-        skyboxIndices.push_back(offset + 0);
-        skyboxIndices.push_back(offset + 1);
-        skyboxIndices.push_back(offset + 2);
-
-        skyboxIndices.push_back(offset + 0);
-        skyboxIndices.push_back(offset + 2);
-        skyboxIndices.push_back(offset + 3);
-    }
-
-    auto checkerboardTexture = TextureAsset::createCheckerboardTexture(device_, 256, 256, 32);
-    skyboxModel_ = std::make_unique<Model>(device_, skyboxVertices, skyboxIndices, checkerboardTexture);
+    // 2. Initialize Skybox Model with default startup texture (level1_2skybox.png)
+    updateSkybox("level1_2skybox.png");
 
     // 3. Utah Teapot Mesh
+    auto checkerboardTexture = TextureAsset::createCheckerboardTexture(device_, 256, 256, 32);
     auto [teapotVertices, teapotIndices] = TeapotModel::generateMesh(1.0f);
     teapotModel_ = std::make_unique<Model>(device_, teapotVertices, teapotIndices, checkerboardTexture);
 
     // 4. Spawn 25 floating teapots scattered in space
-    floatingTeapots_.clear();
+    gameObjects_.clear();
     for (int i = 0; i < 25; ++i) {
         float angle = (float)i / 25.0f * 6.2831853f;
         float dist = 20.0f + (i % 5) * 15.0f;
@@ -359,8 +498,9 @@ void Renderer::createModels() {
         Vec3 color = colors[i % 6];
 
         auto teapot = std::make_unique<RigidBody>(mass, radius, Vec3(x, y, z), color);
+        teapot->type = 0;
         teapot->scale = radius;
         teapot->angularVelocity = Vec3((i % 3 - 1) * 0.2f, (i % 2 - 0.5f) * 0.4f, (i % 4 - 2) * 0.15f);
-        floatingTeapots_.push_back(std::move(teapot));
+        gameObjects_.push_back(std::move(teapot));
     }
 }

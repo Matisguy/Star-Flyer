@@ -4,7 +4,41 @@
 #include "GameSettings.h"
 #include "SensorData.h"
 
+static JavaVM* gJavaVM = nullptr;
+static jobject gMainActivityObj = nullptr;
+
 extern "C" {
+
+JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
+    gJavaVM = vm;
+    return JNI_VERSION_1_6;
+}
+
+void triggerAndroidBanner(const char* message) {
+    if (!gJavaVM || !gMainActivityObj) return;
+    JNIEnv* env = nullptr;
+    jint getEnvRes = gJavaVM->GetEnv((void**)&env, JNI_VERSION_1_6);
+    bool attached = false;
+    if (getEnvRes == JNI_EDETACHED) {
+        if (gJavaVM->AttachCurrentThread(&env, nullptr) == JNI_OK) {
+            attached = true;
+        } else {
+            return;
+        }
+    }
+    if (env) {
+        jclass clazz = env->GetObjectClass(gMainActivityObj);
+        jmethodID method = env->GetMethodID(clazz, "showFloatingBanner", "(Ljava/lang/String;F)V");
+        if (method) {
+            jstring jmsg = env->NewStringUTF(message);
+            env->CallVoidMethod(gMainActivityObj, method, jmsg, 2.0f);
+            env->DeleteLocalRef(jmsg);
+        }
+    }
+    if (attached) {
+        gJavaVM->DetachCurrentThread();
+    }
+}
 
 JNIEXPORT void JNICALL
 Java_com_example_starflyer_MainActivity_nativeRequestCalibration(
@@ -21,6 +55,10 @@ Java_com_example_starflyer_MainActivity_nativeTogglePause(
 JNIEXPORT void JNICALL
 Java_com_example_starflyer_MainActivity_nativeSetGameState(
         JNIEnv *env, jobject thiz, jint state) {
+    if (gMainActivityObj) {
+        env->DeleteGlobalRef(gMainActivityObj);
+    }
+    gMainActivityObj = env->NewGlobalRef(thiz);
     applyGameState(static_cast<GameState>(state));
 }
 

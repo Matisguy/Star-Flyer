@@ -9,5 +9,6 @@ set(STARFLYER_GAME_SOURCES
         ${CMAKE_CURRENT_LIST_DIR}/RigidBody.cpp
         ${CMAKE_CURRENT_LIST_DIR}/Shader.cpp
         ${CMAKE_CURRENT_LIST_DIR}/TeapotModel.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/TapInputHandler.cpp
         ${CMAKE_CURRENT_LIST_DIR}/TextureAsset.cpp
         ${CMAKE_CURRENT_LIST_DIR}/Utility.cpp)

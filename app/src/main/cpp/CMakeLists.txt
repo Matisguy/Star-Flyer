@@ -43,4 +43,4 @@ target_include_directories(starflyer PRIVATE ${STARFLYER_SHADER_DIR})
 # Provided by the SDL3 Android archive through prefab
 find_package(SDL3 REQUIRED CONFIG)
 
-target_link_libraries(starflyer SDL3::SDL3-shared)
+target_link_libraries(starflyer SDL3::SDL3-shared android jnigraphics log)

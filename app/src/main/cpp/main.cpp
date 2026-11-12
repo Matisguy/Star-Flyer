@@ -62,6 +62,11 @@ SDL_AppResult SDL_AppInit(void **appstate, int, char **) {
 
 SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
     auto *app = static_cast<App *>(appstate);
+
+    if (app && app->renderer) {
+        app->renderer->handleEvent(*event);
+    }
+
     switch (event->type) {
         case SDL_EVENT_QUIT:
         case SDL_EVENT_TERMINATING:

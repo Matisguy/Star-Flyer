@@ -7,6 +7,12 @@
 class TextureAsset {
 public:
     /**
+     * Loads a texture asset (PNG, JPG, BMP) from the asset directory or file system
+     */
+    static std::shared_ptr<TextureAsset>
+    loadAsset(SDL_GPUDevice *device, const std::string &assetPath);
+
+    /**
      * Generates a procedural checkerboard texture for the skybox / placeholder rendering
      */
     static std::shared_ptr<TextureAsset>

@@ -447,6 +447,8 @@ public class MainActivity extends SDLActivity implements SensorEventListener {
         rootOverlay.addView(pauseContainer);
     }
 
+    private TextView bannerTextView;
+
     // 5. IN-GAME HUD OVERLAY
     private void createInGameHudScreen() {
         inGameHudContainer = new RelativeLayout(this);
@@ -475,10 +477,37 @@ public class MainActivity extends SDLActivity implements SensorEventListener {
         calibBtn.setLayoutParams(calParams);
         calibBtn.setOnClickListener(v -> nativeRequestCalibration());
 
+        // Floating Banner TextView (Center)
+        bannerTextView = new TextView(this);
+        bannerTextView.setTextColor(Color.GREEN);
+        bannerTextView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
+        bannerTextView.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        bannerTextView.setBackgroundColor(Color.argb(200, 5, 10, 20));
+        bannerTextView.setPadding(32, 16, 32, 16);
+        bannerTextView.setVisibility(View.GONE);
+
+        RelativeLayout.LayoutParams bannerParams = new RelativeLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        bannerParams.addRule(RelativeLayout.CENTER_IN_PARENT);
+        bannerTextView.setLayoutParams(bannerParams);
+
         inGameHudContainer.addView(pauseBtn);
         inGameHudContainer.addView(calibBtn);
+        inGameHudContainer.addView(bannerTextView);
 
         rootOverlay.addView(inGameHudContainer);
+    }
+
+    public void showFloatingBanner(final String message, final float durationSec) {
+        runOnUiThread(() -> {
+            if (bannerTextView != null) {
+                bannerTextView.setText(message);
+                bannerTextView.setVisibility(View.VISIBLE);
+                bannerTextView.postDelayed(() -> bannerTextView.setVisibility(View.GONE), (long)(durationSec * 1000));
+            }
+        });
     }
 
     // SETTINGS OVERLAY DIALOG

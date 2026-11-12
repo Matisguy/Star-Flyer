@@ -12,6 +12,7 @@
 #include "RigidBody.h"
 #include "PlayerShip.h"
 #include "GameSettings.h"
+#include "TapInputHandler.h"
 
 class Renderer {
 public:
@@ -25,11 +26,16 @@ public:
      */
     bool init();
 
+    void handleEvent(const SDL_Event &event);
     void render();
 
 private:
     bool ensureDepthTexture(Uint32 width, Uint32 height);
     void createModels();
+    void updateSkybox(const std::string &textureName);
+
+    void drawHudLine(float x1, float y1, float x2, float y2, float thickness, float r, float g, float b, float a = 1.0f);
+    void drawHudQuad(float centerX, float centerY, float w, float h, std::shared_ptr<TextureAsset> texture, float r, float g, float b, float a = 1.0f);
 
     SDL_Window *window_;
     SDL_GPUDevice *device_ = nullptr;
@@ -43,14 +49,17 @@ private:
 
     OrientationTracker orientationTracker_;
     TimeStep timeStep_;
+    TapInputHandler tapInputHandler_;
 
     // Models & Player Ship
+    std::string currentSkyboxName_;
+    std::shared_ptr<TextureAsset> hitmarkerTexture_;
     std::unique_ptr<Model> skyboxModel_;
     std::unique_ptr<Model> teapotModel_;
     std::unique_ptr<Model> crosshairModel_;
 
     std::unique_ptr<PlayerShip> playerShip_;
-    std::vector<std::unique_ptr<RigidBody>> floatingTeapots_;
+    std::vector<std::unique_ptr<RigidBody>> gameObjects_;
 };
 
 #endif //ANDROIDGLINVESTIGATIONS_RENDERER_H
