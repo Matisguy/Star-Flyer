@@ -18,11 +18,19 @@ public:
     const float* getWorldOrienter() const { return worldOrienter_; }
 
     // Workshop Customization Properties
+    int shipType = 0;
     float shipSpeed = 6.0f;
     float enginePower = 1.0f;
     float handlingAgility = 1.0f;
-    float maxShields = 100.0f;
-    float currentShields = 100.0f;
+    float baseDamage = 12.0f;
+    float chargeDamage = 30.0f;
+    float chargeTime = 1.0f;
+    float maxShields = 50.0f;
+    float currentShields = 50.0f;
+    int maxShieldCount = 2;
+    int currentShieldCount = 2;
+    float maxHealth = 100.0f;
+    float currentHealth = 100.0f;
 
 private:
     std::unique_ptr<RigidBody> rigidBody_;

@@ -5,6 +5,7 @@ set(STARFLYER_GAME_SOURCES
         ${CMAKE_CURRENT_LIST_DIR}/Model.cpp
         ${CMAKE_CURRENT_LIST_DIR}/OrientationTracker.cpp
         ${CMAKE_CURRENT_LIST_DIR}/PlayerShip.cpp
+        ${CMAKE_CURRENT_LIST_DIR}/PolyhedraModel.cpp
         ${CMAKE_CURRENT_LIST_DIR}/Renderer.cpp
         ${CMAKE_CURRENT_LIST_DIR}/RigidBody.cpp
         ${CMAKE_CURRENT_LIST_DIR}/Shader.cpp

@@ -58,6 +58,12 @@ private:
     std::unique_ptr<Model> teapotModel_;
     std::unique_ptr<Model> crosshairModel_;
 
+    // Polyhedra Models
+    std::unique_ptr<Model> icosahedronModel_;
+    std::unique_ptr<Model> rhombicDodecahedronModel_;
+    std::unique_ptr<Model> rhombicuboctahedronModel_;
+    std::unique_ptr<Model> rhombicTriacontahedronModel_;
+
     std::unique_ptr<PlayerShip> playerShip_;
     std::vector<std::unique_ptr<RigidBody>> gameObjects_;
 };
