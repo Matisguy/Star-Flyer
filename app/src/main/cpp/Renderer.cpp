@@ -8,6 +8,7 @@
 #include "Utility.h"
 #include "TextureAsset.h"
 #include "TeapotModel.h"
+#include "PolyhedraModel.h"
 
 Renderer::~Renderer() {
     if (!device_) {
@@ -170,21 +171,31 @@ void Renderer::render() {
         shader_->drawModel(*skyboxModel_);
     }
 
-    // B. Render Floating Teapots in World Space
-    if (teapotModel_ && playerShip_) {
-        for (const auto &teapot : gameObjects_) {
+    // B. Render Floating Polyhedra & Teapots in World Space
+    if (playerShip_) {
+        for (const auto &obj : gameObjects_) {
             float modelMatrix[16], viewMvp[16], finalMvp[16];
-            teapot->getModelMatrix(modelMatrix);
+            obj->getModelMatrix(modelMatrix);
             Utility::multiplyMatrix4x4(finalViewMatrix, modelMatrix, viewMvp);
             Utility::multiplyMatrix4x4(projectionMatrix, viewMvp, finalMvp);
 
             shader_->setProjectionMatrix(finalMvp);
-            if (teapot->pointedAt) {
+            if (obj->pointedAt) {
                 shader_->setColor(0.1f, 1.0f, 0.4f, 1.0f); // Bright Neon Green Target Highlight
             } else {
-                shader_->setColor(teapot->color.x, teapot->color.y, teapot->color.z, 1.0f);
+                shader_->setColor(obj->color.x, obj->color.y, obj->color.z, 1.0f);
             }
-            shader_->drawModel(*teapotModel_);
+
+            // Select Model based on polyhedra type
+            Model *targetModel = teapotModel_.get();
+            if (obj->type == 1 && icosahedronModel_) targetModel = icosahedronModel_.get();
+            else if (obj->type == 2 && rhombicDodecahedronModel_) targetModel = rhombicDodecahedronModel_.get();
+            else if (obj->type == 3 && rhombicuboctahedronModel_) targetModel = rhombicuboctahedronModel_.get();
+            else if (obj->type == 4 && rhombicTriacontahedronModel_) targetModel = rhombicTriacontahedronModel_.get();
+
+            if (targetModel) {
+                shader_->drawModel(*targetModel);
+            }
         }
     }
 
@@ -470,22 +481,35 @@ void Renderer::createModels() {
     // 2. Initialize Skybox Model with default startup texture (level1_2skybox.png)
     updateSkybox("level1_2skybox.png");
 
-    // 3. Utah Teapot Mesh
+    // 3. Create Utah Teapot & Polyhedra Models
     auto checkerboardTexture = TextureAsset::createCheckerboardTexture(device_, 256, 256, 32);
-    auto [teapotVertices, teapotIndices] = TeapotModel::generateMesh(1.0f);
-    teapotModel_ = std::make_unique<Model>(device_, teapotVertices, teapotIndices, checkerboardTexture);
 
-    // 4. Spawn 25 floating teapots scattered in space
+    auto [teapotVerts, teapotInds] = TeapotModel::generateMesh(1.0f);
+    teapotModel_ = std::make_unique<Model>(device_, teapotVerts, teapotInds, checkerboardTexture);
+
+    auto [icoVerts, icoInds] = PolyhedraModel::generateIcosahedron(1.0f);
+    icosahedronModel_ = std::make_unique<Model>(device_, icoVerts, icoInds, checkerboardTexture);
+
+    auto [dodecVerts, dodecInds] = PolyhedraModel::generateRhombicDodecahedron(1.0f);
+    rhombicDodecahedronModel_ = std::make_unique<Model>(device_, dodecVerts, dodecInds, checkerboardTexture);
+
+    auto [cuboVerts, cuboInds] = PolyhedraModel::generateRhombicuboctahedron(1.0f);
+    rhombicuboctahedronModel_ = std::make_unique<Model>(device_, cuboVerts, cuboInds, checkerboardTexture);
+
+    auto [triaconVerts, triaconInds] = PolyhedraModel::generateRhombicTriacontahedron(1.0f);
+    rhombicTriacontahedronModel_ = std::make_unique<Model>(device_, triaconVerts, triaconInds, checkerboardTexture);
+
+    // 4. Spawn 30 space objects (Teapots & Polyhedra) scattered in 3D space
     gameObjects_.clear();
-    for (int i = 0; i < 25; ++i) {
-        float angle = (float)i / 25.0f * 6.2831853f;
-        float dist = 20.0f + (i % 5) * 15.0f;
-        float x = cosf(angle) * dist + ((i % 3) - 1) * 8.0f;
-        float y = sinf(angle * 2.0f) * 10.0f + ((i % 4) - 2) * 5.0f;
-        float z = -15.0f - (i * 6.0f);
+    for (int i = 0; i < 30; ++i) {
+        float angle = static_cast<float>(i) / 30.0f * 6.2831853f;
+        float dist = 20.0f + static_cast<float>(i % 5) * 15.0f;
+        float x = cosf(angle) * dist + static_cast<float>((i % 3) - 1) * 8.0f;
+        float y = sinf(angle * 2.0f) * 10.0f + static_cast<float>((i % 4) - 2) * 5.0f;
+        float z = -15.0f - (i * 5.5f);
 
-        float mass = 1.0f + (i % 6) * 5.0f; // 1kg to 26kg
-        float radius = 1.2f + (i % 4) * 0.4f;
+        float mass = 1.0f + static_cast<float>(i % 6) * 5.0f;
+        float radius = 1.2f + static_cast<float>(i % 4) * 0.4f;
 
         Vec3 colors[] = {
             Vec3(0.95f, 0.78f, 0.3f), // Gold
@@ -493,14 +517,20 @@ void Renderer::createModels() {
             Vec3(0.35f, 0.4f, 0.5f),  // Slate
             Vec3(0.9f, 0.9f, 0.95f),  // Silver
             Vec3(0.85f, 0.25f, 0.25f),// Crimson
-            Vec3(0.2f, 0.85f, 0.95f)  // Cyan
+            Vec3(0.2f, 0.85f, 0.95f), // Cyan
+            Vec3(0.2f, 0.9f, 0.4f),  // Emerald
+            Vec3(0.7f, 0.3f, 0.9f)   // Amethyst
         };
-        Vec3 color = colors[i % 6];
+        Vec3 color = colors[i % 8];
 
-        auto teapot = std::make_unique<RigidBody>(mass, radius, Vec3(x, y, z), color);
-        teapot->type = 0;
-        teapot->scale = radius;
-        teapot->angularVelocity = Vec3((i % 3 - 1) * 0.2f, (i % 2 - 0.5f) * 0.4f, (i % 4 - 2) * 0.15f);
-        gameObjects_.push_back(std::move(teapot));
+        auto object = std::make_unique<RigidBody>(mass, radius, Vec3(x, y, z), color);
+        object->type = i % 5; // 0=Teapot, 1=Icosahedron, 2=RhombicDodecahedron, 3=Rhombicuboctahedron, 4=RhombicTriacontahedron
+        object->scale = radius;
+        object->angularVelocity = Vec3(
+            static_cast<float>(i % 3 - 1) * 0.25f,
+            static_cast<float>(i % 2 - 0.5f) * 0.4f,
+            static_cast<float>(i % 4 - 2) * 0.2f
+        );
+        gameObjects_.push_back(std::move(object));
     }
 }
