@@ -189,6 +189,70 @@ TextureAsset::createCheckerboardTexture(
     return std::shared_ptr<TextureAsset>(new TextureAsset(device, texture, sampler));
 }
 
+std::shared_ptr<TextureAsset>
+TextureAsset::createSolidTexture(
+        SDL_GPUDevice *device, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+    int width = 16;
+    int height = 16;
+    std::vector<uint8_t> pixels(width * height * 4);
+    for (int i = 0; i < width * height; ++i) {
+        pixels[i * 4 + 0] = r;
+        pixels[i * 4 + 1] = g;
+        pixels[i * 4 + 2] = b;
+        pixels[i * 4 + 3] = a;
+    }
+
+    SDL_GPUTextureCreateInfo textureInfo = {};
+    textureInfo.type = SDL_GPU_TEXTURETYPE_2D;
+    textureInfo.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+    textureInfo.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
+    textureInfo.width = static_cast<Uint32>(width);
+    textureInfo.height = static_cast<Uint32>(height);
+    textureInfo.layer_count_or_depth = 1;
+    textureInfo.num_levels = 1;
+    SDL_GPUTexture *texture = SDL_CreateGPUTexture(device, &textureInfo);
+
+    SDL_GPUTransferBufferCreateInfo transferInfo = {};
+    transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    transferInfo.size = static_cast<Uint32>(pixels.size());
+    SDL_GPUTransferBuffer *transfer = SDL_CreateGPUTransferBuffer(device, &transferInfo);
+
+    void *mapped = SDL_MapGPUTransferBuffer(device, transfer, false);
+    SDL_memcpy(mapped, pixels.data(), pixels.size());
+    SDL_UnmapGPUTransferBuffer(device, transfer);
+
+    SDL_GPUCommandBuffer *commandBuffer = SDL_AcquireGPUCommandBuffer(device);
+    SDL_GPUCopyPass *copyPass = SDL_BeginGPUCopyPass(commandBuffer);
+
+    SDL_GPUTextureTransferInfo source = {};
+    source.transfer_buffer = transfer;
+    source.pixels_per_row = static_cast<Uint32>(width);
+    source.rows_per_layer = static_cast<Uint32>(height);
+
+    SDL_GPUTextureRegion destination = {};
+    destination.texture = texture;
+    destination.w = static_cast<Uint32>(width);
+    destination.h = static_cast<Uint32>(height);
+    destination.d = 1;
+
+    SDL_UploadToGPUTexture(copyPass, &source, &destination, false);
+    SDL_EndGPUCopyPass(copyPass);
+    SDL_SubmitGPUCommandBuffer(commandBuffer);
+    SDL_ReleaseGPUTransferBuffer(device, transfer);
+
+    SDL_GPUSamplerCreateInfo samplerInfo = {};
+    samplerInfo.min_filter = SDL_GPU_FILTER_LINEAR;
+    samplerInfo.mag_filter = SDL_GPU_FILTER_LINEAR;
+    samplerInfo.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_LINEAR;
+    samplerInfo.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
+    samplerInfo.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
+    samplerInfo.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
+    samplerInfo.max_lod = 1.0f;
+    SDL_GPUSampler *sampler = SDL_CreateGPUSampler(device, &samplerInfo);
+
+    return std::shared_ptr<TextureAsset>(new TextureAsset(device, texture, sampler));
+}
+
 TextureAsset::~TextureAsset() {
     SDL_ReleaseGPUSampler(device_, sampler_);
     SDL_ReleaseGPUTexture(device_, texture_);

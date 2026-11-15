@@ -31,6 +31,7 @@ public:
     int currentShieldCount = 2;
     float maxHealth = 100.0f;
     float currentHealth = 100.0f;
+    float currentBoost = 0.0f;
 
 private:
     std::unique_ptr<RigidBody> rigidBody_;

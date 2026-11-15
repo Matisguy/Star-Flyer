@@ -56,7 +56,8 @@ private:
     std::shared_ptr<TextureAsset> hitmarkerTexture_;
     std::unique_ptr<Model> skyboxModel_;
     std::unique_ptr<Model> teapotModel_;
-    std::unique_ptr<Model> crosshairModel_;
+    std::unique_ptr<Model> crosshair1Model_;
+    std::unique_ptr<Model> crosshair2Model_;
 
     // Polyhedra Models
     std::unique_ptr<Model> icosahedronModel_;

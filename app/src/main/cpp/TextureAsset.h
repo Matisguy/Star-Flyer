@@ -22,6 +22,17 @@ public:
             int height = 256,
             int checkSize = 32);
 
+    /**
+     * Generates a solid color texture (e.g. solid white RGBA for polyhedra models)
+     */
+    static std::shared_ptr<TextureAsset>
+    createSolidTexture(
+            SDL_GPUDevice *device,
+            uint8_t r = 255,
+            uint8_t g = 255,
+            uint8_t b = 255,
+            uint8_t a = 255);
+
     ~TextureAsset();
 
     SDL_GPUTexture *getTexture() const { return texture_; }

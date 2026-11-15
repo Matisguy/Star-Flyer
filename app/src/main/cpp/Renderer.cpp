@@ -19,7 +19,8 @@ Renderer::~Renderer() {
 
     skyboxModel_.reset();
     teapotModel_.reset();
-    crosshairModel_.reset();
+    crosshair1Model_.reset();
+    crosshair2Model_.reset();
     shader_.reset();
 
     if (depthTexture_) {
@@ -200,19 +201,19 @@ void Renderer::render() {
     }
 
     // C. Render Flight Direction / Ship Nose Reticle (Positioned in front of ship in world space)
-    if (teapotModel_ && playerShip_) {
+    if (crosshair1Model_ && crosshair2Model_ && rhombicuboctahedronModel_ && playerShip_) {
         float shipMatrix[16];
         playerShip_->getRigidBody().orientation.toMatrix(shipMatrix);
 
         // Forward look direction from ship orientation basis (-Z column)
         Vec3 forwardDir(-shipMatrix[8], -shipMatrix[9], -shipMatrix[10]);
 
-        // Position crosshair 6.0 units directly ahead of ship in world space
-        Vec3 crosshairPos = playerShip_->getRigidBody().position + forwardDir * 6.0f;
+        // Position first crosshair 4.0 units directly ahead of ship in world space
+        Vec3 crosshairPos = playerShip_->getRigidBody().position + forwardDir * 4.0f;
 
         RigidBody crosshairBody(0.0f, 0.1f, crosshairPos, Vec3(0.1f, 0.95f, 0.4f));
         crosshairBody.orientation = playerShip_->getRigidBody().orientation;
-        crosshairBody.scale = 0.12f;
+        crosshairBody.scale = 0.2f;
 
         float modelMatrix[16], viewMvp[16], finalMvp[16];
         crosshairBody.getModelMatrix(modelMatrix);
@@ -222,7 +223,35 @@ void Renderer::render() {
 
         shader_->setProjectionMatrix(finalMvp);
         shader_->setColor(0.1f, 0.95f, 0.4f, 1.0f); // Bright Neon Cyan-Green
-        shader_->drawModel(*teapotModel_);
+        shader_->drawModel(*crosshair1Model_);
+
+        // Do it again with Crosshair 2
+        crosshairBody.position = crosshairBody.position + forwardDir * 4.0f;
+        crosshairBody.orientation = Quaternion(1,0,0,0);
+        crosshairBody.scale = 0.4f;
+
+        crosshairBody.getModelMatrix(modelMatrix);
+
+        Utility::multiplyMatrix4x4(finalViewMatrix, modelMatrix, viewMvp);
+        Utility::multiplyMatrix4x4(projectionMatrix, viewMvp, finalMvp);
+
+        shader_->setProjectionMatrix(finalMvp);
+        shader_->setColor(0.1f, 0.95f, 0.4f, 1.0f); // Bright Neon Cyan-Green
+        shader_->drawModel(*crosshair2Model_);
+
+        // And once more time for the far crosshair
+        crosshairBody.position = crosshairBody.position + forwardDir * 4.0f;
+        crosshairBody.orientation = playerShip_->getRigidBody().orientation;
+        crosshairBody.scale = 0.05f;
+
+        crosshairBody.getModelMatrix(modelMatrix);
+
+        Utility::multiplyMatrix4x4(finalViewMatrix, modelMatrix, viewMvp);
+        Utility::multiplyMatrix4x4(projectionMatrix, viewMvp, finalMvp);
+
+        shader_->setProjectionMatrix(finalMvp);
+        shader_->setColor(0.1f, 0.95f, 0.4f, 1.0f); // Bright Neon Cyan-Green
+        shader_->drawModel(*rhombicuboctahedronModel_);
     }
 
     // D. Render Tap Intersecting Crosshair Lines (Vertical & Horizontal)
@@ -418,7 +447,7 @@ std::pair<std::vector<Vertex>, std::vector<Index>> createSkyboxNetMesh(float s) 
         Vertex(Vector3{s, s, s}, Vector2{u0, v2}),
         Vertex(Vector3{s, s,-s}, Vector2{u1, v2}),
         Vertex(Vector3{s,-s,-s}, Vector2{u1, v1}),
-        Vertex(Vector3{s,-s, s}, Vector2{0, v1}),
+        Vertex(Vector3{s,-s, s}, Vector2{u0, v1}),
 
         // 4. Right Face (-X) - Column 2, Middle Row (u2..u3, v1..v2)
         Vertex(Vector3{ -s, s,-s}, Vector2{u2, v2}),
@@ -481,23 +510,30 @@ void Renderer::createModels() {
     // 2. Initialize Skybox Model with default startup texture (level1_2skybox.png)
     updateSkybox("level1_2skybox.png");
 
-    // 3. Create Utah Teapot & Polyhedra Models
-    auto checkerboardTexture = TextureAsset::createCheckerboardTexture(device_, 256, 256, 32);
+    // 3. Create Utah Teapot & Polyhedra Models with Solid Textures
+    auto solidTexture = TextureAsset::createSolidTexture(device_, 255, 255, 255, 255);
+    auto checkerTexture = TextureAsset::createCheckerboardTexture(device_, 255, 255, 32);
 
     auto [teapotVerts, teapotInds] = TeapotModel::generateMesh(1.0f);
-    teapotModel_ = std::make_unique<Model>(device_, teapotVerts, teapotInds, checkerboardTexture);
+    teapotModel_ = std::make_unique<Model>(device_, teapotVerts, teapotInds, checkerTexture);
 
     auto [icoVerts, icoInds] = PolyhedraModel::generateIcosahedron(1.0f);
-    icosahedronModel_ = std::make_unique<Model>(device_, icoVerts, icoInds, checkerboardTexture);
+    icosahedronModel_ = std::make_unique<Model>(device_, icoVerts, icoInds, solidTexture);
 
     auto [dodecVerts, dodecInds] = PolyhedraModel::generateRhombicDodecahedron(1.0f);
-    rhombicDodecahedronModel_ = std::make_unique<Model>(device_, dodecVerts, dodecInds, checkerboardTexture);
+    rhombicDodecahedronModel_ = std::make_unique<Model>(device_, dodecVerts, dodecInds, solidTexture);
 
     auto [cuboVerts, cuboInds] = PolyhedraModel::generateRhombicuboctahedron(1.0f);
-    rhombicuboctahedronModel_ = std::make_unique<Model>(device_, cuboVerts, cuboInds, checkerboardTexture);
+    rhombicuboctahedronModel_ = std::make_unique<Model>(device_, cuboVerts, cuboInds, solidTexture);
 
     auto [triaconVerts, triaconInds] = PolyhedraModel::generateRhombicTriacontahedron(1.0f);
-    rhombicTriacontahedronModel_ = std::make_unique<Model>(device_, triaconVerts, triaconInds, checkerboardTexture);
+    rhombicTriacontahedronModel_ = std::make_unique<Model>(device_, triaconVerts, triaconInds, solidTexture);
+
+    auto [ret1Verts, ret1Inds] = PolyhedraModel::generateReticle1(1.0f);
+    crosshair1Model_ = std::make_unique<Model>(device_, ret1Verts, ret1Inds, solidTexture);
+
+    auto [ret2Verts, ret2Inds] = PolyhedraModel::generateReticle2(1.0f);
+    crosshair2Model_ = std::make_unique<Model>(device_, ret2Verts, ret2Inds, solidTexture);
 
     // 4. Spawn 30 space objects (Teapots & Polyhedra) scattered in 3D space
     gameObjects_.clear();
